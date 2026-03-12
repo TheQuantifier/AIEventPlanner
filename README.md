@@ -72,6 +72,7 @@ Render notes:
 - Deploy the web service with `npm run start:web`
 - Set `APP_BASE_URL` on the API service to the API's public Render URL or custom domain
 - Set `API_BASE_URL` on the web service to that same API URL so the browser talks to the correct backend
+- Render injects environment variables directly, so production start commands should not depend on a local `.env` file
 
 To create the Brevo inbound webhook from `.env` instead of the dashboard:
 
