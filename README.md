@@ -10,6 +10,7 @@ Minimal split-stack prototype for an autonomous event-planning workflow.
 - API drafts inquiry emails for the top three vendors and exposes them to the web app.
 - User reviews the final shortlist and confirms the selected vendor.
 - API drafts the final confirmation email for the chosen vendor.
+- Plans are persisted to Neon in a JSON-backed `event_plans` table so state survives restarts and deploys.
 
 ## Project layout
 
@@ -82,6 +83,13 @@ Render notes:
 - Set `API_BASE_URL` on the web service to that same API URL so the browser talks to the correct backend
 - Render injects environment variables directly, so production start commands should not depend on a local `.env` file
 
+Database notes:
+
+- On API startup, the server runs SQL migrations from `api/migrations/`.
+- Applied migrations are tracked in a `schema_migrations` table.
+- Each plan is stored as a full JSON document in Postgres for a simple first persistence layer.
+- `DB_URL` is the primary connection string used by the API.
+
 To create the Mailgun inbound route from `.env`:
 
 ```bash
@@ -98,14 +106,13 @@ node --env-file=.env scripts/setup-mailgun-route.js --replace-domain
 
 This scaffold still uses:
 
-- In-memory plan storage
 - Mock vendor catalog data
 - Simple vendor scoring and message threading assumptions
-- No persistent booking state across server restarts
+- JSON document persistence rather than fully normalized relational tables
 
 To turn this into the full product you described, the next integrations are:
 
 1. Real search and comparison APIs for venues, vendors, maps, pricing, and reviews
 2. LLM-based extraction for user requirements and follow-up questions
-3. Database-backed persistence for plans, vendors, outbound mail, inbound replies, and decisions
+3. Normalized database tables for plans, vendors, outbound mail, inbound replies, and decisions
 4. Human approval controls before every outbound email and final booking action

@@ -2,6 +2,7 @@ import { vendorCatalog } from "./data/vendors.js";
 import { buildConfirmationEmail, buildInquiryEmail } from "./email.js";
 import { buildPlanReplyAddress, sendEmail } from "./email-client.js";
 import { generateIntakeWithAi, generatePlanWithAi, isAiConfigured } from "./ai-planner.js";
+import { isDbConfigured, loadPlan, savePlan } from "./db.js";
 
 const plans = new Map();
 const requiredFields = ["brief", "budget", "location", "dates"];
@@ -12,6 +13,33 @@ function createId(prefix) {
 
 function normalizeText(value) {
   return String(value || "").trim();
+}
+
+async function persistPlan(plan) {
+  plans.set(plan.id, plan);
+
+  if (isDbConfigured()) {
+    await savePlan(plan);
+  }
+
+  return plan;
+}
+
+async function getStoredPlan(planId) {
+  if (plans.has(planId)) {
+    return plans.get(planId);
+  }
+
+  if (!isDbConfigured()) {
+    return null;
+  }
+
+  const plan = await loadPlan(planId);
+  if (plan) {
+    plans.set(planId, plan);
+  }
+
+  return plan;
 }
 
 function inferEventType(brief) {
@@ -279,12 +307,11 @@ export async function createPlan(payload) {
     finalSelection: null
   };
 
-  plans.set(plan.id, plan);
-  return plan;
+  return persistPlan(plan);
 }
 
-export function getPlan(planId) {
-  return plans.get(planId) || null;
+export async function getPlan(planId) {
+  return getStoredPlan(planId);
 }
 
 async function deliverEmail(message) {
@@ -300,7 +327,7 @@ async function deliverEmail(message) {
 }
 
 export async function sendPlanInquiries(planId) {
-  const plan = plans.get(planId);
+  const plan = await getStoredPlan(planId);
 
   if (!plan) {
     return null;
@@ -346,8 +373,7 @@ export async function sendPlanInquiries(planId) {
     shortlist: updatedShortlist
   };
 
-  plans.set(planId, updatedPlan);
-  return updatedPlan;
+  return persistPlan(updatedPlan);
 }
 
 function extractEmailAddress(value) {
@@ -379,7 +405,7 @@ function extractPlanAddress(payload) {
   return candidates.map(extractEmailAddress).find(Boolean) || "";
 }
 
-export function recordInboundReply(payload) {
+export async function recordInboundReply(payload) {
   const planAddress = extractPlanAddress(payload);
 
   if (!planAddress) {
@@ -390,7 +416,7 @@ export function recordInboundReply(payload) {
   }
 
   const [planId] = planAddress.split("@");
-  const plan = plans.get(planId);
+  const plan = await getStoredPlan(planId);
 
   if (!plan) {
     return {
@@ -435,7 +461,7 @@ export function recordInboundReply(payload) {
     shortlist: updatedShortlist
   };
 
-  plans.set(plan.id, updatedPlan);
+  await persistPlan(updatedPlan);
 
   return {
     ok: true,
@@ -445,7 +471,7 @@ export function recordInboundReply(payload) {
 }
 
 export async function finalizeVendorSelection(planId, vendorId) {
-  const plan = plans.get(planId);
+  const plan = await getStoredPlan(planId);
 
   if (!plan) {
     return null;
@@ -498,6 +524,5 @@ export async function finalizeVendorSelection(planId, vendorId) {
     }
   };
 
-  plans.set(planId, updatedPlan);
-  return updatedPlan;
+  return persistPlan(updatedPlan);
 }

@@ -1,5 +1,6 @@
 import http from "node:http";
 import { getConfigStatus } from "./src/config/env.js";
+import { runMigrations } from "./src/migrations.js";
 import { validateMailgunSignature, validateWebhookToken } from "./src/email-client.js";
 import { analyzeIntake, createPlan, finalizeVendorSelection, getPlan, recordInboundReply, sendPlanInquiries } from "./src/planner.js";
 
@@ -97,7 +98,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && path.startsWith("/api/plans/")) {
       const planId = path.replace("/api/plans/", "");
-      const plan = getPlan(planId);
+      const plan = await getPlan(planId);
 
       if (!plan) {
         return sendJson(response, 404, { error: "Plan not found" });
@@ -144,7 +145,7 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 401, { error: "Invalid Mailgun signature" });
       }
 
-      const result = recordInboundReply(payload);
+      const result = await recordInboundReply(payload);
       return sendJson(response, result.ok ? 200 : 400, result);
     }
 
@@ -157,6 +158,13 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`API listening on http://localhost:${PORT}`);
-});
+runMigrations()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`API listening on http://localhost:${PORT}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Failed to run database migrations", error);
+    process.exit(1);
+  });
