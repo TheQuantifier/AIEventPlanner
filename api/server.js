@@ -1,6 +1,6 @@
 import http from "node:http";
 import { getConfigStatus } from "./src/config/env.js";
-import { validateWebhookToken } from "./src/email-client.js";
+import { validateMailgunSignature, validateWebhookToken } from "./src/email-client.js";
 import { analyzeIntake, createPlan, finalizeVendorSelection, getPlan, recordInboundReply, sendPlanInquiries } from "./src/planner.js";
 
 const PORT = Number(process.env.PORT || 4000);
@@ -21,17 +21,40 @@ function sendNotFound(response) {
   });
 }
 
-async function readJsonBody(request) {
-  let body = "";
+async function readBodyBuffer(request) {
+  const chunks = [];
   for await (const chunk of request) {
-    body += chunk;
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
+
+  return Buffer.concat(chunks);
+}
+
+async function readJsonBody(request) {
+  const body = (await readBodyBuffer(request)).toString("utf8");
 
   if (!body) {
     return {};
   }
 
   return JSON.parse(body);
+}
+
+async function readFormBody(request) {
+  const buffer = await readBodyBuffer(request);
+  const contentType = request.headers["content-type"] || "application/x-www-form-urlencoded";
+  const formData = await new Response(buffer, {
+    headers: {
+      "content-type": contentType
+    }
+  }).formData();
+
+  const payload = {};
+  for (const [key, value] of formData.entries()) {
+    payload[key] = typeof value === "string" ? value : value.name;
+  }
+
+  return payload;
 }
 
 const server = http.createServer(async (request, response) => {
@@ -110,12 +133,17 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, result);
     }
 
-    if (request.method === "POST" && path === "/api/webhooks/brevo/inbound") {
+    if (request.method === "POST" && path === "/api/webhooks/mailgun/inbound") {
       if (!validateWebhookToken(url)) {
         return sendJson(response, 401, { error: "Invalid webhook token" });
       }
 
-      const payload = await readJsonBody(request);
+      const payload = await readFormBody(request);
+
+      if (!validateMailgunSignature(payload)) {
+        return sendJson(response, 401, { error: "Invalid Mailgun signature" });
+      }
+
       const result = recordInboundReply(payload);
       return sendJson(response, result.ok ? 200 : 400, result);
     }

@@ -6,11 +6,14 @@ export const appConfig = {
   emailClient: {
     provider: read("EMAIL_CLIENT_PROVIDER"),
     apiKey: read("EMAIL_CLIENT_API_KEY"),
+    apiBase: read("EMAIL_CLIENT_API_BASE", "https://api.mailgun.net"),
+    domain: read("EMAIL_CLIENT_DOMAIN"),
     senderName: read("EMAIL_CLIENT_SENDER_NAME"),
     senderEmail: read("EMAIL_CLIENT_SENDER_EMAIL"),
     replyTo: read("EMAIL_CLIENT_REPLY_TO"),
     inboundDomain: read("EMAIL_CLIENT_INBOUND_DOMAIN"),
-    webhookSecret: read("EMAIL_CLIENT_WEBHOOK_SECRET")
+    webhookSecret: read("EMAIL_CLIENT_WEBHOOK_SECRET"),
+    webhookSigningKey: read("EMAIL_CLIENT_WEBHOOK_SIGNING_KEY")
   },
   db: {
     provider: read("DB_PROVIDER"),
@@ -28,7 +31,7 @@ export function getConfigStatus() {
   return {
     emailClient: {
       provider: appConfig.emailClient.provider || "unset",
-      configured: Boolean(appConfig.emailClient.apiKey && appConfig.emailClient.senderEmail),
+      configured: Boolean(appConfig.emailClient.apiKey && appConfig.emailClient.senderEmail && appConfig.emailClient.domain),
       inboundConfigured: Boolean(appConfig.emailClient.inboundDomain)
     },
     db: {

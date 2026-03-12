@@ -331,6 +331,10 @@ function extractPlanAddress(payload) {
     candidates.push(payload.recipient);
   }
 
+  if (payload.Recipient) {
+    candidates.push(payload.Recipient);
+  }
+
   if (payload.headers && typeof payload.headers === "object") {
     candidates.push(payload.headers["x-envelope-to"]);
     candidates.push(payload.headers["delivered-to"]);
@@ -359,15 +363,19 @@ export function recordInboundReply(payload) {
     };
   }
 
-  const fromEmail = extractEmailAddress(payload.from || payload.sender?.email || "");
+  const fromEmail = extractEmailAddress(
+    payload.from || payload.sender?.email || payload.sender || payload.From || payload["body-from"] || ""
+  );
   const vendor = plan.shortlist.find((item) => item.inquiryEmail.to.toLowerCase() === fromEmail.toLowerCase());
 
   const inboundMessage = {
     id: createId("inbound"),
     receivedAt: new Date().toISOString(),
     from: fromEmail || "unknown",
-    subject: String(payload.subject || ""),
-    text: String(payload.text || payload["stripped-text"] || payload.html || ""),
+    subject: String(payload.subject || payload.Subject || ""),
+    text: String(
+      payload["body-plain"] || payload["stripped-text"] || payload.text || payload["stripped-html"] || payload.html || ""
+    ),
     vendorId: vendor?.id || null
   };
 

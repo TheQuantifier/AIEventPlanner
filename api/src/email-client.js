@@ -1,16 +1,20 @@
 import { appConfig } from "./config/env.js";
-
-const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
+import crypto from "node:crypto";
 
 function trim(value) {
   return String(value || "").trim();
 }
 
+function trimTrailingSlash(value) {
+  return trim(value).replace(/\/+$/, "");
+}
+
 export function isEmailClientConfigured() {
   return Boolean(
-    trim(appConfig.emailClient.provider).toLowerCase() === "brevo" &&
+    trim(appConfig.emailClient.provider).toLowerCase() === "mailgun" &&
       trim(appConfig.emailClient.apiKey) &&
-      trim(appConfig.emailClient.senderEmail)
+      trim(appConfig.emailClient.senderEmail) &&
+      trim(appConfig.emailClient.domain)
   );
 }
 
@@ -33,48 +37,45 @@ export async function sendEmail({ to, subject, text, replyTo, tags = [] }) {
     };
   }
 
-  const payload = {
-    sender: {
-      name: appConfig.emailClient.senderName || "AI Event Planner",
-      email: appConfig.emailClient.senderEmail
-    },
-    to: [{ email: to }],
-    subject,
-    textContent: text
-  };
+  const form = new URLSearchParams();
+  form.set("from", `${appConfig.emailClient.senderName || "AI Event Planner"} <${appConfig.emailClient.senderEmail}>`);
+  form.set("to", to);
+  form.set("subject", subject);
+  form.set("text", text);
 
   const finalReplyTo = trim(replyTo) || trim(appConfig.emailClient.replyTo);
   if (finalReplyTo) {
-    payload.replyTo = {
-      email: finalReplyTo
-    };
+    form.set("h:Reply-To", finalReplyTo);
   }
 
   if (tags.length > 0) {
-    payload.tags = tags;
+    form.set("o:tag", tags[0]);
+    tags.slice(1).forEach((tag) => form.append("o:tag", tag));
   }
 
-  const response = await fetch(BREVO_API_URL, {
+  const auth = Buffer.from(`api:${appConfig.emailClient.apiKey}`).toString("base64");
+  const apiBase = trimTrailingSlash(appConfig.emailClient.apiBase || "https://api.mailgun.net");
+  const response = await fetch(`${apiBase}/v3/${appConfig.emailClient.domain}/messages`, {
     method: "POST",
     headers: {
       accept: "application/json",
-      "content-type": "application/json",
-      "api-key": appConfig.emailClient.apiKey
+      authorization: `Basic ${auth}`,
+      "content-type": "application/x-www-form-urlencoded"
     },
-    body: JSON.stringify(payload)
+    body: form.toString()
   });
 
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.message || `Brevo request failed with status ${response.status}`);
+    throw new Error(data.message || `Mailgun request failed with status ${response.status}`);
   }
 
   return {
     ok: true,
     skipped: false,
-    provider: "brevo",
-    messageId: data.messageId || null
+    provider: "mailgun",
+    messageId: data.id || null
   };
 }
 
@@ -85,4 +86,31 @@ export function validateWebhookToken(url) {
   }
 
   return url.searchParams.get("token") === expected;
+}
+
+export function validateMailgunSignature(payload) {
+  const signingKey = trim(appConfig.emailClient.webhookSigningKey);
+
+  if (!signingKey) {
+    return true;
+  }
+
+  const timestamp = trim(payload.timestamp);
+  const token = trim(payload.token);
+  const signature = trim(payload.signature);
+
+  if (!timestamp || !token || !signature) {
+    return false;
+  }
+
+  const digest = crypto
+    .createHmac("sha256", signingKey)
+    .update(`${timestamp}${token}`)
+    .digest("hex");
+
+  if (digest.length !== signature.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
 }
