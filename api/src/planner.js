@@ -1,6 +1,7 @@
 import { vendorCatalog } from "./data/vendors.js";
 import { buildConfirmationEmail, buildInquiryEmail } from "./email.js";
 import { buildPlanReplyAddress, sendEmail } from "./email-client.js";
+import { generateIntakeWithAi, generatePlanWithAi, isAiConfigured } from "./ai-planner.js";
 
 const plans = new Map();
 const requiredFields = ["brief", "budget", "location", "dates"];
@@ -9,12 +10,12 @@ function createId(prefix) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function normalizeBrief(value) {
+function normalizeText(value) {
   return String(value || "").trim();
 }
 
 function inferEventType(brief) {
-  const text = brief.toLowerCase();
+  const text = normalizeText(brief).toLowerCase();
 
   if (text.includes("wedding")) return "wedding";
   if (text.includes("birthday")) return "birthday";
@@ -30,39 +31,18 @@ function inferEventType(brief) {
   return "custom-event";
 }
 
-function generateSuggestions(eventType) {
-  const fallback = [
-    "Elegant dinner with live music",
-    "Modern rooftop networking event",
-    "Garden celebration with premium catering"
-  ];
-
-  const suggestionsByType = {
-    wedding: ["Garden ceremony and reception", "Classic ballroom evening", "Destination-style weekend celebration"],
-    birthday: ["Private chef dinner party", "Rooftop cocktail celebration", "Interactive game-night venue"],
-    corporate: ["Executive dinner", "Branded launch event", "Offsite workshop with networking hour"],
-    fundraiser: ["Mission-focused gala", "Donor brunch", "Auction night with live entertainment"]
-  };
-
-  return suggestionsByType[eventType] || fallback;
-}
-
 function parseBudget(value) {
   const numeric = Number(String(value || "").replace(/[^0-9.]/g, ""));
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 10000;
 }
 
 function deriveDateWindow(dates) {
-  if (Array.isArray(dates) && dates.length > 0) {
-    return dates.join(" to ");
-  }
-
-  const text = normalizeBrief(dates);
+  const text = normalizeText(dates);
   return text || "Flexible";
 }
 
 function deriveLocation(location) {
-  return normalizeBrief(location) || "Flexible";
+  return normalizeText(location) || "Flexible";
 }
 
 function deriveGuestCount(value) {
@@ -70,16 +50,57 @@ function deriveGuestCount(value) {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 100;
 }
 
+function generateFallbackIdeas(type, theme) {
+  const themeText = normalizeText(theme);
+  const suffix = themeText ? ` with a ${themeText} feel` : "";
+  const ideas = {
+    wedding: [`Garden ceremony${suffix}`, `Modern dinner reception${suffix}`, `Weekend destination-style celebration${suffix}`],
+    birthday: [`Private dinner party${suffix}`, `Rooftop celebration${suffix}`, `Interactive experience night${suffix}`],
+    corporate: [`Executive dinner${suffix}`, `Team offsite${suffix}`, `Brand launch event${suffix}`]
+  };
+
+  return ideas[type] || [`Curated celebration${suffix}`, `Modern social gathering${suffix}`, `Destination-inspired event${suffix}`];
+}
+
+function collectMissingFields(payload) {
+  return requiredFields.filter((field) => normalizeText(payload[field]).length === 0);
+}
+
+function buildFallbackIntake(payload) {
+  const eventType = inferEventType(payload.brief);
+  const missingFields = collectMissingFields(payload);
+  const suggestions = normalizeText(payload.brief).split(/\s+/).filter(Boolean).length < 6
+    ? generateFallbackIdeas(eventType, payload.theme)
+    : [];
+
+  return {
+    eventType,
+    readiness: missingFields.length === 0 ? "ready-for-research" : "needs-more-detail",
+    missingFields,
+    followUpQuestions: missingFields.map((field) => ({
+      field,
+      question:
+        {
+          budget: "What budget range should I design around?",
+          location: "Which city or area should I focus on?",
+          dates: "What dates are you considering, or are they flexible?",
+          brief: "What kind of event are you planning?"
+        }[field] || "Can you share a bit more detail?"
+    })),
+    suggestions,
+    assistantMessage:
+      missingFields.length === 0
+        ? `I have enough to start shaping options for this ${eventType}.`
+        : `I can start guiding this ${eventType}, but I still need a few details before I recommend options.`
+  };
+}
+
 function vendorMatches(vendor, event) {
   const locationMatch =
     event.location === "Flexible" ||
     vendor.serviceArea.some((area) => area.toLowerCase().includes(event.location.toLowerCase()));
 
-  const eventTypeMatch =
-    vendor.eventTypes.includes(event.type) ||
-    vendor.eventTypes.includes("corporate") ||
-    event.type === "custom-event";
-
+  const eventTypeMatch = vendor.eventTypes.includes(event.type) || event.type === "custom-event";
   const capacityMatch = vendor.capacity >= event.guestCount;
   return locationMatch && eventTypeMatch && capacityMatch;
 }
@@ -97,125 +118,147 @@ function scoreVendor(vendor, event) {
   return Math.round(ratingScore + budgetAlignment + speedScore + locationScore);
 }
 
-function rankVendors(event) {
-  return vendorCatalog
-    .filter((vendor) => vendorMatches(vendor, event))
-    .map((vendor) => {
-      const score = scoreVendor(vendor, event);
-      return {
-        ...vendor,
-        score,
-        status: "available",
-        estimatedQuote: vendor.category === "catering" ? vendor.basePrice * event.guestCount : vendor.basePrice
-      };
-    })
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 3);
-}
-
-function buildEvent(payload) {
-  const brief = normalizeBrief(payload.brief);
+function buildFallbackEvent(payload) {
+  const brief = normalizeText(payload.brief);
   const type = inferEventType(brief);
   const budget = parseBudget(payload.budget);
   const location = deriveLocation(payload.location);
   const dateWindow = deriveDateWindow(payload.dates);
   const guestCount = deriveGuestCount(payload.guestCount);
+  const theme = normalizeText(payload.theme);
 
   return {
     brief,
     type,
+    theme,
     budget,
     budgetLabel: `$${budget.toLocaleString()}`,
     location,
     dateWindow,
     guestCount,
-    suggestions: brief.split(/\s+/).filter(Boolean).length < 6 ? generateSuggestions(type) : []
+    suggestions: generateFallbackIdeas(type, theme),
+    plannerSummary: theme
+      ? `A ${theme} direction can guide the venue, catering, and visual tone for this event.`
+      : `This plan focuses on practical, budget-aware options that fit the event brief.`
   };
 }
 
-function describeField(field) {
-  const labels = {
-    brief: "what kind of event you want",
-    budget: "your budget range",
-    location: "the event location",
-    dates: "the preferred dates"
+function buildFallbackShortlist(event) {
+  return vendorCatalog
+    .filter((vendor) => vendorMatches(vendor, event))
+    .map((vendor) => ({
+      ...vendor,
+      score: scoreVendor(vendor, event),
+      status: "available",
+      estimatedQuote: vendor.category === "catering" ? vendor.basePrice * event.guestCount : vendor.basePrice
+    }))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 3);
+}
+
+function coerceEvent(payload, eventData = {}) {
+  const budget = Number(eventData.budget);
+  const guestCount = Number(eventData.guestCount);
+
+  return {
+    brief: normalizeText(eventData.brief || payload.brief),
+    type: normalizeText(eventData.type || inferEventType(payload.brief)),
+    theme: normalizeText(eventData.theme || payload.theme),
+    budget: Number.isFinite(budget) && budget > 0 ? budget : parseBudget(payload.budget),
+    budgetLabel: normalizeText(eventData.budgetLabel) || `$${(Number.isFinite(budget) && budget > 0 ? budget : parseBudget(payload.budget)).toLocaleString()}`,
+    location: normalizeText(eventData.location || payload.location) || "Flexible",
+    dateWindow: normalizeText(eventData.dateWindow || payload.dates) || "Flexible",
+    guestCount: Number.isFinite(guestCount) && guestCount > 0 ? guestCount : deriveGuestCount(payload.guestCount),
+    suggestions: Array.isArray(eventData.suggestions) ? eventData.suggestions.filter(Boolean) : [],
+    plannerSummary: normalizeText(eventData.plannerSummary)
   };
-
-  return labels[field];
 }
 
-function collectMissingFields(payload) {
-  return requiredFields.filter((field) => normalizeBrief(payload[field]).length === 0);
-}
-
-function buildFollowUpQuestions(missingFields, eventType) {
-  return missingFields.map((field) => {
-    const prompts = {
-      brief: `What kind of ${eventType === "custom-event" ? "event" : eventType} are you planning?`,
-      budget: "What budget range should I plan around?",
-      location: "What city or area should I target?",
-      dates: "What dates are preferred, or are the dates flexible?"
+function normalizeShortlist(shortlist, event, replyTo) {
+  return shortlist.slice(0, 3).map((vendor, index) => {
+    const normalizedVendor = {
+      id: createId("vendor"),
+      rank: index + 1,
+      name: normalizeText(vendor.name) || `Option ${index + 1}`,
+      category: normalizeText(vendor.category) || "vendor",
+      rating: Number(vendor.rating) || 4.5,
+      score: Math.max(1, Math.round(Number(vendor.score) || 78)),
+      estimatedQuote: Math.max(500, Math.round(Number(vendor.estimatedQuote) || event.budget / 3)),
+      serviceArea: Array.isArray(vendor.serviceArea) ? vendor.serviceArea.filter(Boolean) : [event.location],
+      summary: normalizeText(vendor.summary) || "Strong fit for the event brief.",
+      status: "available",
+      email: normalizeText(vendor.email) || "jhandalex100@gmail.com"
     };
 
     return {
-      field,
-      question: prompts[field]
+      ...normalizedVendor,
+      inquiryEmail: buildInquiryEmail({
+        event,
+        vendor: normalizedVendor,
+        replyTo
+      })
     };
   });
 }
 
-function buildIntakeMessage({ eventType, missingFields, suggestions }) {
-  if (missingFields.length === 0) {
-    return `I understand this as a ${eventType}. I have enough to start researching vendors and building a shortlist.`;
+export async function analyzeIntake(payload) {
+  if (!isAiConfigured()) {
+    return buildFallbackIntake(payload);
   }
 
-  const missingSummary = missingFields.map((field) => describeField(field)).join(", ");
-  const suggestionText = suggestions.length
-    ? ` Possible directions: ${suggestions.join("; ")}.`
-    : "";
-
-  return `I think this is a ${eventType}. Before I research vendors, I still need ${missingSummary}.${suggestionText}`;
+  try {
+    return await generateIntakeWithAi(payload);
+  } catch {
+    return buildFallbackIntake(payload);
+  }
 }
 
-export function analyzeIntake(payload) {
-  const brief = normalizeBrief(payload.brief);
-  const eventType = inferEventType(brief);
-  const suggestions = brief.split(/\s+/).filter(Boolean).length < 6 ? generateSuggestions(eventType) : [];
-  const missingFields = collectMissingFields(payload);
-  const followUpQuestions = buildFollowUpQuestions(missingFields, eventType);
-
-  return {
-    eventType,
-    readiness: missingFields.length === 0 ? "ready-for-research" : "needs-more-detail",
-    missingFields,
-    followUpQuestions,
-    suggestions,
-    assistantMessage: buildIntakeMessage({
-      eventType,
-      missingFields,
-      suggestions
-    })
-  };
-}
-
-export function createPlan(payload) {
-  const event = buildEvent(payload);
-  const rankedVendors = rankVendors(event);
+export async function createPlan(payload) {
   const planId = createId("plan");
   const replyTo = buildPlanReplyAddress(planId);
-  const shortlist = rankedVendors.map((vendor, index) => ({
-    id: vendor.id,
-    rank: index + 1,
-    name: vendor.name,
-    category: vendor.category,
-    rating: vendor.rating,
-    score: vendor.score,
-    estimatedQuote: vendor.estimatedQuote,
-    serviceArea: vendor.serviceArea,
-    summary: vendor.summary,
-    status: vendor.status,
-    inquiryEmail: buildInquiryEmail({ event, vendor, replyTo })
-  }));
+
+  let event;
+  let shortlist;
+
+  if (isAiConfigured()) {
+    try {
+      const aiResult = await generatePlanWithAi(payload);
+      event = coerceEvent(payload, aiResult.event);
+      shortlist = normalizeShortlist(Array.isArray(aiResult.shortlist) ? aiResult.shortlist : [], event, replyTo);
+    } catch {
+      event = buildFallbackEvent(payload);
+      shortlist = buildFallbackShortlist(event).map((vendor, index) => ({
+        id: vendor.id,
+        rank: index + 1,
+        name: vendor.name,
+        category: vendor.category,
+        rating: vendor.rating,
+        score: vendor.score,
+        estimatedQuote: vendor.estimatedQuote,
+        serviceArea: vendor.serviceArea,
+        summary: vendor.summary,
+        status: vendor.status,
+        email: vendor.email,
+        inquiryEmail: buildInquiryEmail({ event, vendor, replyTo })
+      }));
+    }
+  } else {
+    event = buildFallbackEvent(payload);
+    shortlist = buildFallbackShortlist(event).map((vendor, index) => ({
+      id: vendor.id,
+      rank: index + 1,
+      name: vendor.name,
+      category: vendor.category,
+      rating: vendor.rating,
+      score: vendor.score,
+      estimatedQuote: vendor.estimatedQuote,
+      serviceArea: vendor.serviceArea,
+      summary: vendor.summary,
+      status: vendor.status,
+      email: vendor.email,
+      inquiryEmail: buildInquiryEmail({ event, vendor, replyTo })
+    }));
+  }
 
   const plan = {
     id: planId,
@@ -228,13 +271,6 @@ export function createPlan(payload) {
       inboundMessages: []
     },
     automation: {
-      researched: true,
-      ratingSystem: {
-        ratingWeight: "40%",
-        budgetFitWeight: "25%",
-        responseSpeedWeight: "15%",
-        locationFitWeight: "20%"
-      },
       inquiryEmailsDrafted: shortlist.length,
       inquiryEmailsSent: 0,
       vendorRepliesReceived: 0
@@ -292,7 +328,7 @@ export async function sendPlanInquiries(planId) {
 
     updatedShortlist.push({
       ...vendor,
-      status: delivery.ok ? "inquiry-sent" : vendor.status
+      status: delivery.ok ? "contacted" : vendor.status
     });
   }
 
@@ -373,9 +409,7 @@ export function recordInboundReply(payload) {
     receivedAt: new Date().toISOString(),
     from: fromEmail || "unknown",
     subject: String(payload.subject || payload.Subject || ""),
-    text: String(
-      payload["body-plain"] || payload["stripped-text"] || payload.text || payload["stripped-html"] || payload.html || ""
-    ),
+    text: String(payload["body-plain"] || payload["stripped-text"] || payload.text || payload["stripped-html"] || payload.html || ""),
     vendorId: vendor?.id || null
   };
 
@@ -383,7 +417,7 @@ export function recordInboundReply(payload) {
     item.id === vendor?.id
       ? {
           ...item,
-          status: "vendor-replied"
+          status: "replied"
         }
       : item
   );
@@ -457,6 +491,7 @@ export async function finalizeVendorSelection(planId, vendorId) {
     },
     finalSelection: {
       vendorId: selectedVendor.id,
+      vendorName: selectedVendor.name,
       selectedAt: new Date().toISOString(),
       confirmationEmail,
       delivery

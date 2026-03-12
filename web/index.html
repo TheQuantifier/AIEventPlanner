@@ -7,58 +7,20 @@
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
-    <div class="background-orb orb-left"></div>
-    <div class="background-orb orb-right"></div>
     <main class="shell">
-      <section class="hero-shell">
-        <section class="hero">
-          <p class="eyebrow">Autonomous event sourcing and outreach</p>
-          <h1>Describe the event once. The system handles the planning intake after that.</h1>
-          <p class="lede">
-            Start with a rough idea or a specific brief. The assistant classifies the event,
-            asks for anything missing, and only then moves into vendor research and outreach.
-          </p>
-          <div class="hero-actions">
-            <a href="#planner-form" class="hero-link">Start intake</a>
-            <span class="hero-note">AI intake first, vendor search second</span>
-          </div>
-        </section>
-
-        <aside class="hero-card panel">
-          <p class="eyebrow">Workflow</p>
-          <ol class="hero-steps">
-            <li>User describes the event.</li>
-            <li>AI detects the event type and missing info.</li>
-            <li>Only complete briefs continue to research.</li>
-            <li>User later approves the final vendor.</li>
-          </ol>
-          <div class="hero-metrics">
-            <div>
-              <strong>4</strong>
-              <span>required intake fields</span>
-            </div>
-            <div>
-              <strong>3</strong>
-              <span>top vendors returned</span>
-            </div>
-          </div>
-        </aside>
+      <section class="hero">
+        <p class="eyebrow">AI Event Planner</p>
+        <h1>Plan the feeling first. The rest follows.</h1>
+        <p class="lede">
+          Describe the event, set the basics, and let the planner shape ideas and shortlist the right options.
+        </p>
       </section>
 
-      <section class="workspace">
-        <section class="panel intake-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Step 1</p>
-              <h2>Event intake</h2>
-            </div>
-            <p>Capture the event concept, then let the assistant tell you what it still needs.</p>
-          </div>
-
+      <section class="panel intake-panel">
           <form id="planner-form" class="planner-form">
             <label class="field field-large">
-              <span>Event brief</span>
-              <textarea id="brief" name="brief" placeholder="Example: I need help planning a company offsite for 80 people in Chicago this summer."></textarea>
+              <span>What are you planning?</span>
+              <textarea id="brief" name="brief" placeholder="Example: I want a stylish company dinner for 80 people in Chicago this fall."></textarea>
             </label>
 
             <div class="grid">
@@ -75,44 +37,24 @@
                 <input id="dates" name="dates" placeholder="June 10 to June 14">
               </label>
               <label class="field">
+                <span>Theme</span>
+                <input id="theme" name="theme" placeholder="Minimal, garden party, modern luxury">
+              </label>
+              <label class="field">
                 <span>Guest count</span>
                 <input id="guestCount" name="guestCount" type="number" min="1" placeholder="100">
               </label>
             </div>
 
             <div class="action-row">
-              <button type="submit">Analyze event with AI</button>
-              <button id="continue-button" type="button" class="secondary hidden">Continue to vendor search</button>
+              <button type="submit">Get ideas</button>
+              <button id="continue-button" type="button" class="secondary hidden">See recommendations</button>
             </div>
           </form>
-        </section>
-
-        <aside class="side-rail">
-          <section class="panel rail-card">
-            <p class="eyebrow">What the AI checks</p>
-            <ul class="rail-list">
-              <li>What kind of event this is</li>
-              <li>Whether budget is clear enough</li>
-              <li>Whether location is fixed or flexible</li>
-              <li>Whether dates are missing or open-ended</li>
-            </ul>
-          </section>
-
-          <section class="panel rail-card">
-            <p class="eyebrow">Suggested usage</p>
-            <p class="rail-copy">
-              If the user only says “birthday party” or “company retreat,” the assistant should
-              suggest possible directions before asking the follow-up questions.
-            </p>
-          </section>
-        </aside>
       </section>
 
       <section id="intake-results" class="panel hidden">
-        <div class="panel-header">
-          <h2>AI intake</h2>
-          <p>The assistant identifies the event type and asks for anything missing before vendor research starts.</p>
-        </div>
+        <h2>Planner notes</h2>
         <div id="assistant-message" class="summary"></div>
         <div id="detected-type" class="suggestions"></div>
         <div id="follow-up-questions" class="follow-up-list"></div>
@@ -120,26 +62,17 @@
 
       <section id="results" class="results hidden">
         <div class="panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Step 2</p>
-              <h2>Event analysis</h2>
-            </div>
-            <p>Once intake is complete, the plan can move into vendor research and shortlist generation.</p>
-          </div>
+          <h2>Your event direction</h2>
           <div id="event-summary" class="summary"></div>
           <div id="suggestions" class="suggestions"></div>
           <div class="action-row section-actions">
-            <button id="send-inquiries-button" type="button" class="hidden">Send inquiry emails</button>
+            <button id="send-inquiries-button" type="button" class="hidden">Start outreach</button>
           </div>
           <div id="outreach-status" class="follow-up-list hidden"></div>
         </div>
 
         <div class="panel">
-          <div class="panel-header">
-            <h2>Top vendors</h2>
-            <p>The API already researched, scored, and drafted outreach for the shortlist below.</p>
-          </div>
+          <h2>Recommended matches</h2>
           <div id="shortlist" class="shortlist"></div>
         </div>
 

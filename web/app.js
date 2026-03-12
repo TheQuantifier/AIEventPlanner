@@ -44,6 +44,7 @@ function readPayload() {
     budget: document.querySelector("#budget").value,
     location: document.querySelector("#location").value,
     dates: document.querySelector("#dates").value,
+    theme: document.querySelector("#theme").value,
     guestCount: document.querySelector("#guestCount").value
   };
 }
@@ -90,12 +91,8 @@ function renderSelectionStatus(plan) {
 
   selectionStatus.classList.remove("hidden");
   selectionStatus.innerHTML = `
-    <h2>Vendor confirmed</h2>
-    <p>
-      The app finalized <strong>${plan.finalSelection.vendorId}</strong> and generated the
-      confirmation email below.
-    </p>
-    <pre class="email-preview">${plan.finalSelection.confirmationEmail.body}</pre>
+    <h2>Selection saved</h2>
+    <p>${plan.finalSelection.vendorName || "Your chosen option"} is marked as the preferred fit for this event.</p>
   `;
 }
 
@@ -110,18 +107,19 @@ function renderOutreachStatus(plan) {
 
   outreachStatus.classList.remove("hidden");
   outreachStatus.innerHTML = inquiries
-    .map(
-      (message) => `
+    .map((message) => {
+      const vendorName = plan.shortlist.find((vendor) => vendor.id === message.vendorId)?.name || message.vendorId;
+      return `
         <div class="follow-up-item">
-          <strong>${message.vendorId}</strong><br>
+          <strong>${vendorName}</strong><br>
           ${
             message.delivery.ok
-              ? `Email sent successfully${message.delivery.messageId ? ` (${message.delivery.messageId})` : ""}.`
-              : `Email skipped: ${message.delivery.reason || "not configured"}.`
+              ? `Outreach has started.`
+              : `This option could not be contacted yet.`
           }
         </div>
-      `
-    )
+      `;
+    })
     .join("");
 }
 
@@ -175,20 +173,18 @@ function renderShortlist(plan) {
         <article class="vendor-card">
           <div class="vendor-topline">
             <div>
-              <p class="eyebrow">Rank ${vendor.rank}</p>
+              <p class="eyebrow">Option ${vendor.rank}</p>
               <h3>${vendor.name}</h3>
             </div>
             <strong>${currency(vendor.estimatedQuote)}</strong>
           </div>
           <div class="vendor-meta">
             <span>${vendor.category}</span>
-            <span>Rating ${vendor.rating}/5</span>
-            <span>Score ${vendor.score}</span>
-            <span>Status: ${vendor.status}</span>
+            <span>${vendor.serviceArea.join(", ")}</span>
+            <span>${vendor.rating}/5</span>
           </div>
           <p>${vendor.summary}</p>
-          <pre class="email-preview">${vendor.inquiryEmail.body}</pre>
-          <button type="button" data-vendor-id="${vendor.id}">Select this vendor</button>
+          <button type="button" data-vendor-id="${vendor.id}">Choose this option</button>
         </article>
       `
     )
@@ -197,14 +193,14 @@ function renderShortlist(plan) {
   shortlist.querySelectorAll("button[data-vendor-id]").forEach((button) => {
     button.addEventListener("click", async () => {
       button.disabled = true;
-      button.textContent = "Finalizing...";
+      button.textContent = "Saving...";
 
       try {
         await finalizeVendor(button.dataset.vendorId);
-        button.textContent = "Selected";
+        button.textContent = "Chosen";
       } catch (error) {
         button.disabled = false;
-        button.textContent = "Select this vendor";
+        button.textContent = "Choose this option";
         alert(error.message);
       }
     });
@@ -268,18 +264,21 @@ continueButton.addEventListener("click", async () => {
   }
 
   summary.innerHTML = `
-    <p><strong>Type:</strong> ${currentPlan.event.type}</p>
+    <p><strong>Event:</strong> ${currentPlan.event.type}</p>
+    <p><strong>Theme:</strong> ${currentPlan.event.theme || "Open"}</p>
     <p><strong>Budget:</strong> ${currentPlan.event.budgetLabel}</p>
-    <p><strong>Location:</strong> ${currentPlan.event.location}</p>
-    <p><strong>Dates:</strong> ${currentPlan.event.dateWindow}</p>
-    <p><strong>Guest count:</strong> ${currentPlan.event.guestCount}</p>
-    <p><strong>Automation:</strong> ${currentPlan.automation.inquiryEmailsDrafted} inquiry drafts prepared. ${currentPlan.automation.inquiryEmailsSent} have been sent through the email client.</p>
+    <p><strong>Where:</strong> ${currentPlan.event.location}</p>
+    <p><strong>When:</strong> ${currentPlan.event.dateWindow}</p>
+    <p><strong>Guests:</strong> ${currentPlan.event.guestCount}</p>
+    ${currentPlan.event.plannerSummary ? `<p>${currentPlan.event.plannerSummary}</p>` : ""}
   `;
 
   renderSuggestions(currentPlan.event.suggestions);
   renderOutreachStatus(currentPlan);
   renderShortlist(currentPlan);
   renderSelectionStatus(currentPlan);
+  sendInquiriesButton.disabled = false;
+  sendInquiriesButton.textContent = "Start outreach";
   sendInquiriesButton.classList.remove("hidden");
   results.classList.remove("hidden");
 });
@@ -290,10 +289,10 @@ sendInquiriesButton.addEventListener("click", async () => {
 
   try {
     await sendInquiries();
-    sendInquiriesButton.textContent = "Inquiry emails sent";
+    sendInquiriesButton.textContent = "Outreach started";
   } catch (error) {
     sendInquiriesButton.disabled = false;
-    sendInquiriesButton.textContent = "Send inquiry emails";
+    sendInquiriesButton.textContent = "Start outreach";
     alert(error.message);
   }
 });

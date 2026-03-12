@@ -5,8 +5,8 @@ Minimal split-stack prototype for an autonomous event-planning workflow.
 ## What it does
 
 - Web app collects a user brief, budget, location, dates, and guest count.
-- API infers the event type and suggests ideas when the brief is sparse.
-- API auto-ranks vendors with a simple scoring model based on rating, budget fit, response speed, and location fit.
+- Gemini analyzes the event brief, theme, and missing details during intake.
+- Gemini can suggest event directions and research vendor/location options when needed.
 - API drafts inquiry emails for the top three vendors and exposes them to the web app.
 - User reviews the final shortlist and confirms the selected vendor.
 - API drafts the final confirmation email for the chosen vendor.
@@ -57,6 +57,11 @@ Example mapping:
 - Mailgun -> `EMAIL_CLIENT_*`
 - Neon -> `DB_*`
 - Gemini -> `AI_*`
+
+UI notes:
+
+- The intake form includes a `theme` field so the planner can shape recommendations around mood and style.
+- The interface intentionally keeps backend implementation details out of the user flow.
 
 Mailgun notes:
 

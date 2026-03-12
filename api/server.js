@@ -85,13 +85,13 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && path === "/api/plans") {
       const payload = await readJsonBody(request);
-      const plan = createPlan(payload);
+      const plan = await createPlan(payload);
       return sendJson(response, 201, plan);
     }
 
     if (request.method === "POST" && path === "/api/intake") {
       const payload = await readJsonBody(request);
-      const intake = analyzeIntake(payload);
+      const intake = await analyzeIntake(payload);
       return sendJson(response, 200, intake);
     }
 
