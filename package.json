@@ -1,0 +1,14 @@
+{
+  "name": "ai-event-planner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:api": "node --env-file=.env api/server.js",
+    "dev:web": "node --env-file=.env web/server.js",
+    "start": "node --env-file=.env api/server.js",
+    "start:web": "node --env-file=.env web/server.js",
+    "check": "node --env-file=.env --check api/server.js && node --env-file=.env --check web/server.js && node --env-file=.env --check web/app.js && node --env-file=.env --check scripts/setup-brevo-inbound-webhook.js",
+    "setup:brevo-webhook": "node --env-file=.env scripts/setup-brevo-inbound-webhook.js"
+  }
+}
