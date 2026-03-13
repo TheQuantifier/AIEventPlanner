@@ -44,6 +44,9 @@ The repo includes both `.env` and `.env.example` with provider-agnostic names so
 - `EMAIL_CLIENT_REPLY_TO`
 - `EMAIL_CLIENT_INBOUND_DOMAIN`
 - `EMAIL_CLIENT_WEBHOOK_SECRET`
+- `EMAIL_CLIENT_WEBHOOK_SIGNING_KEY`
+- `EMAIL_CLIENT_TEST_MODE`
+- `EMAIL_CLIENT_TEST_RECIPIENT`
 - `DB_PROVIDER`
 - `DB_URL`
 - `DB_DIRECT_URL`
@@ -72,6 +75,8 @@ Mailgun notes:
 - Set `EMAIL_CLIENT_INBOUND_DOMAIN` to your inbound subdomain, for example `reply.manuswebworks.org`
 - Set `EMAIL_CLIENT_WEBHOOK_SECRET` and configure the Mailgun route to call `/api/webhooks/mailgun/inbound?token=YOUR_SECRET`
 - Set `EMAIL_CLIENT_WEBHOOK_SIGNING_KEY` to the Mailgun webhook signing key so inbound requests can be verified
+- Set `EMAIL_CLIENT_TEST_MODE=true` when you want all outbound mail redirected to one inbox
+- Set `EMAIL_CLIENT_TEST_RECIPIENT=jhandalex100@gmail.com` or another inbox you control for testing
 - Set `APP_BASE_URL` to the public base URL of your deployed API, for example `https://api.manuswebworks.org`
 - The app generates a per-plan reply-to address like `plan-abc123@reply.manuswebworks.org`
 

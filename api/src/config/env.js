@@ -13,7 +13,9 @@ export const appConfig = {
     replyTo: read("EMAIL_CLIENT_REPLY_TO"),
     inboundDomain: read("EMAIL_CLIENT_INBOUND_DOMAIN"),
     webhookSecret: read("EMAIL_CLIENT_WEBHOOK_SECRET"),
-    webhookSigningKey: read("EMAIL_CLIENT_WEBHOOK_SIGNING_KEY")
+    webhookSigningKey: read("EMAIL_CLIENT_WEBHOOK_SIGNING_KEY"),
+    testMode: read("EMAIL_CLIENT_TEST_MODE", "false"),
+    testRecipient: read("EMAIL_CLIENT_TEST_RECIPIENT")
   },
   db: {
     provider: read("DB_PROVIDER"),
@@ -32,7 +34,8 @@ export function getConfigStatus() {
     emailClient: {
       provider: appConfig.emailClient.provider || "unset",
       configured: Boolean(appConfig.emailClient.apiKey && appConfig.emailClient.senderEmail && appConfig.emailClient.domain),
-      inboundConfigured: Boolean(appConfig.emailClient.inboundDomain)
+      inboundConfigured: Boolean(appConfig.emailClient.inboundDomain),
+      testMode: String(appConfig.emailClient.testMode).toLowerCase() === "true"
     },
     db: {
       provider: appConfig.db.provider || "unset",

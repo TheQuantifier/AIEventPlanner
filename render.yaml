@@ -25,6 +25,10 @@ services:
         sync: false
       - key: EMAIL_CLIENT_WEBHOOK_SIGNING_KEY
         sync: false
+      - key: EMAIL_CLIENT_TEST_MODE
+        sync: false
+      - key: EMAIL_CLIENT_TEST_RECIPIENT
+        sync: false
       - key: DB_PROVIDER
         sync: false
       - key: DB_URL

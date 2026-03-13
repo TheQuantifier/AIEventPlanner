@@ -9,6 +9,26 @@ function trimTrailingSlash(value) {
   return trim(value).replace(/\/+$/, "");
 }
 
+function isTestModeEnabled() {
+  return trim(appConfig.emailClient.testMode).toLowerCase() === "true";
+}
+
+function resolveRecipient(to) {
+  if (!isTestModeEnabled()) {
+    return {
+      intendedRecipient: to,
+      deliveryRecipient: to
+    };
+  }
+
+  const testRecipient = trim(appConfig.emailClient.testRecipient);
+
+  return {
+    intendedRecipient: to,
+    deliveryRecipient: testRecipient || to
+  };
+}
+
 export function isEmailClientConfigured() {
   return Boolean(
     trim(appConfig.emailClient.provider).toLowerCase() === "mailgun" &&
@@ -37,9 +57,10 @@ export async function sendEmail({ to, subject, text, replyTo, tags = [] }) {
     };
   }
 
+  const { intendedRecipient, deliveryRecipient } = resolveRecipient(to);
   const form = new URLSearchParams();
   form.set("from", `${appConfig.emailClient.senderName || "AI Event Planner"} <${appConfig.emailClient.senderEmail}>`);
-  form.set("to", to);
+  form.set("to", deliveryRecipient);
   form.set("subject", subject);
   form.set("text", text);
 
@@ -75,7 +96,10 @@ export async function sendEmail({ to, subject, text, replyTo, tags = [] }) {
     ok: true,
     skipped: false,
     provider: "mailgun",
-    messageId: data.id || null
+    messageId: data.id || null,
+    intendedRecipient,
+    deliveredTo: deliveryRecipient,
+    testMode: isTestModeEnabled()
   };
 }
 

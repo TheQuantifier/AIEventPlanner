@@ -11,7 +11,7 @@ export const vendorCatalog = [
     capacity: 220,
     amenities: ["indoor", "garden", "parking", "catering-friendly"],
     summary: "Glass conservatory venue with flexible layouts and premium service.",
-    email: "jhandalex100@gmail.com"
+    email: "events@lakeviewconservatory.example"
   },
   {
     id: "venue-cityforge",
@@ -25,7 +25,7 @@ export const vendorCatalog = [
     capacity: 140,
     amenities: ["industrial", "av", "bar", "downtown"],
     summary: "Modern loft venue optimized for presentations and private events.",
-    email: "jhandalex100@gmail.com"
+    email: "bookings@cityforgeloft.example"
   },
   {
     id: "venue-olivehall",
@@ -39,7 +39,7 @@ export const vendorCatalog = [
     capacity: 300,
     amenities: ["estate", "bridal-suite", "valet", "outdoor"],
     summary: "High-end estate venue suited for premium celebrations.",
-    email: "jhandalex100@gmail.com"
+    email: "concierge@olivehallestate.example"
   },
   {
     id: "planner-sparrow",
@@ -53,7 +53,7 @@ export const vendorCatalog = [
     capacity: 250,
     amenities: ["planning", "vendor-coordination", "timelines"],
     summary: "Hands-on planning team with strong logistics and design support.",
-    email: "jhandalex100@gmail.com"
+    email: "hello@sparrowevents.example"
   },
   {
     id: "catering-hearth",
@@ -67,7 +67,7 @@ export const vendorCatalog = [
     capacity: 400,
     amenities: ["buffet", "plated", "vegetarian", "dessert"],
     summary: "Chef-led catering with strong dietary accommodation.",
-    email: "jhandalex100@gmail.com"
+    email: "sales@hearthtable.example"
   },
   {
     id: "photo-northlight",
@@ -81,6 +81,6 @@ export const vendorCatalog = [
     capacity: 500,
     amenities: ["photo", "video", "editing", "drone"],
     summary: "Editorial-style photography and highlight films.",
-    email: "jhandalex100@gmail.com"
+    email: "book@northlightstories.example"
   }
 ];
