@@ -12,11 +12,20 @@ Minimal split-stack prototype for an autonomous event-planning workflow.
 - User reviews the final shortlist and confirms the selected vendor.
 - API drafts the final confirmation email for the chosen vendor.
 - Plans are persisted to Neon in a JSON-backed `event_plans` table so state survives restarts and deploys.
+- Dashboard events are now loaded from the API, and pause/delete actions persist server-side.
 
 ## Project layout
 
 - `api/` HTTP API and event-planning orchestration logic.
 - `web/` static client and lightweight local web server.
+
+API dashboard endpoints:
+
+- `GET /api/plans`
+- `POST /api/plans`
+- `PUT /api/plans/:id`
+- `PATCH /api/plans/:id/pause`
+- `DELETE /api/plans/:id`
 
 ## Run locally
 
@@ -80,8 +89,11 @@ Mailgun notes:
 - Set `EMAIL_CLIENT_WEBHOOK_SIGNING_KEY` to the Mailgun webhook signing key so inbound requests can be verified
 - Set `EMAIL_CLIENT_TEST_MODE=true` if you want inbox rerouting outside the dedicated testing stage
 - Set `EMAIL_CLIENT_TEST_RECIPIENT=jhandalex100@gmail.com` or another inbox you control for testing; in `testing` stage this becomes the delivery target for all vendor email
-- Set `APP_BASE_URL` to the public base URL of your deployed API, for example `https://api.manuswebworks.org`
+- Set `APP_BASE_URL` to the API base URL for the current environment
+- For local development, use `APP_BASE_URL=http://localhost:4000`
+- For Render, use your public Render API URL or custom domain, for example `https://api.manuswebworks.org`
 - The app generates a per-plan reply-to address like `plan-abc123@reply.manuswebworks.org`
+- Important: external providers like Mailgun cannot call back to `localhost`, so inbound webhook setup must use your public Render URL, not a local URL
 
 Render notes:
 
@@ -91,6 +103,12 @@ Render notes:
 - Set `APP_BASE_URL` on the API service to the API's public Render URL or custom domain
 - Set `API_BASE_URL` on the web service to that same API URL so the browser talks to the correct backend
 - Render injects environment variables directly, so production start commands should not depend on a local `.env` file
+
+Local notes:
+
+- In your local `.env`, set `APP_BASE_URL=http://localhost:4000`
+- In your local `.env`, set `API_BASE_URL=http://localhost:4000`
+- Keep the Render dashboard values pointed at Render; do not try to use one env var value for both localhost and production
 
 Database notes:
 

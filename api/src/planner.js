@@ -1,8 +1,8 @@
 import { vendorCatalog } from "./data/vendors.js";
 import { buildConfirmationEmail, buildInquiryEmail } from "./email.js";
-import { buildPlanReplyAddress, sendEmail } from "./email-client.js";
+import { buildPlanReplyAddress, isTestModeEnabled, resolveAppInbox, sendEmail } from "./email-client.js";
 import { generateIntakeWithAi, generatePlanWithAi, isAiConfigured } from "./ai-planner.js";
-import { isDbConfigured, loadPlan, savePlan } from "./db.js";
+import { deletePlan, isDbConfigured, listPlans, loadPlan, savePlan } from "./db.js";
 
 const plans = new Map();
 const requiredFields = ["brief", "budget", "location", "dates"];
@@ -40,6 +40,22 @@ async function getStoredPlan(planId) {
   }
 
   return plan;
+}
+
+async function listStoredPlans() {
+  if (isDbConfigured()) {
+    const storedPlans = await listPlans();
+    storedPlans.forEach((plan) => {
+      plans.set(plan.id, plan);
+    });
+    return storedPlans;
+  }
+
+  return [...plans.values()].sort((left, right) => {
+    const leftTime = new Date(left.createdAt || 0).getTime();
+    const rightTime = new Date(right.createdAt || 0).getTime();
+    return rightTime - leftTime;
+  });
 }
 
 function inferEventType(brief) {
@@ -185,6 +201,8 @@ function buildFallbackShortlist(event) {
 }
 
 function buildShortlistFromCatalog(event, replyTo) {
+  const testingInbox = resolveTestingVendorEmail();
+
   return buildFallbackShortlist(event).map((vendor, index) => ({
     id: vendor.id,
     rank: index + 1,
@@ -196,9 +214,21 @@ function buildShortlistFromCatalog(event, replyTo) {
     serviceArea: vendor.serviceArea,
     summary: vendor.summary,
     status: vendor.status,
-    email: vendor.email,
-    inquiryEmail: buildInquiryEmail({ event, vendor, replyTo })
+    email: testingInbox || vendor.email,
+    intendedEmail: vendor.email,
+    inquiryEmail: buildInquiryEmail({
+      event,
+      vendor: {
+        ...vendor,
+        email: testingInbox || vendor.email
+      },
+      replyTo
+    })
   }));
+}
+
+function resolveTestingVendorEmail() {
+  return isTestModeEnabled() ? resolveAppInbox() || "jhandalex100@gmail.com" : "";
 }
 
 function coerceEvent(payload, eventData = {}) {
@@ -220,6 +250,8 @@ function coerceEvent(payload, eventData = {}) {
 }
 
 function normalizeShortlist(shortlist, event, replyTo) {
+  const testingInbox = resolveTestingVendorEmail();
+
   return shortlist.slice(0, 3).map((vendor, index) => {
     const normalizedVendor = {
       id: createId("vendor"),
@@ -232,7 +264,8 @@ function normalizeShortlist(shortlist, event, replyTo) {
       serviceArea: Array.isArray(vendor.serviceArea) ? vendor.serviceArea.filter(Boolean) : [event.location],
       summary: normalizeText(vendor.summary) || "Strong fit for the event brief.",
       status: "available",
-      email: normalizeText(vendor.email) || "jhandalex100@gmail.com"
+      email: testingInbox || normalizeText(vendor.email) || "jhandalex100@gmail.com",
+      intendedEmail: normalizeText(vendor.email)
     };
 
     return {
@@ -258,10 +291,9 @@ export async function analyzeIntake(payload) {
   }
 }
 
-export async function createPlan(payload) {
-  const planId = createId("plan");
-  const replyTo = buildPlanReplyAddress(planId);
-
+async function buildPlanDocument(payload, existingPlan = null) {
+  const planId = existingPlan?.id || createId("plan");
+  const replyTo = existingPlan?.communication?.replyTo || buildPlanReplyAddress(planId);
   let event;
   let shortlist;
 
@@ -287,10 +319,12 @@ export async function createPlan(payload) {
     shortlist = buildShortlistFromCatalog(event, replyTo);
   }
 
-  const plan = {
+  return {
     id: planId,
-    createdAt: new Date().toISOString(),
+    createdAt: existingPlan?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     workflowState: "awaiting-user-selection",
+    isPaused: Boolean(existingPlan?.isPaused),
     event,
     communication: {
       replyTo,
@@ -305,8 +339,27 @@ export async function createPlan(payload) {
     shortlist,
     finalSelection: null
   };
+}
+
+export async function createPlan(payload) {
+  const plan = await buildPlanDocument(payload);
 
   return persistPlan(plan);
+}
+
+export async function updatePlan(planId, payload) {
+  const existingPlan = await getStoredPlan(planId);
+
+  if (!existingPlan) {
+    return null;
+  }
+
+  const plan = await buildPlanDocument(payload, existingPlan);
+  return persistPlan(plan);
+}
+
+export async function listAllPlans() {
+  return listStoredPlans();
 }
 
 export async function getPlan(planId) {
@@ -330,6 +383,12 @@ export async function sendPlanInquiries(planId) {
 
   if (!plan) {
     return null;
+  }
+
+  if (plan.isPaused) {
+    return {
+      error: "Plan is paused"
+    };
   }
 
   const outboundMessages = [...plan.communication.outboundMessages];
@@ -370,6 +429,7 @@ export async function sendPlanInquiries(planId) {
 
   const updatedPlan = {
     ...plan,
+    updatedAt: new Date().toISOString(),
     workflowState: "vendor-inquiries-sent",
     communication: {
       ...plan.communication,
@@ -459,6 +519,7 @@ export async function recordInboundReply(payload) {
 
   const updatedPlan = {
     ...plan,
+    updatedAt: new Date().toISOString(),
     communication: {
       ...plan.communication,
       inboundMessages: [...plan.communication.inboundMessages, inboundMessage]
@@ -486,6 +547,12 @@ export async function finalizeVendorSelection(planId, vendorId) {
     return null;
   }
 
+  if (plan.isPaused) {
+    return {
+      error: "Plan is paused"
+    };
+  }
+
   const selectedVendor = plan.shortlist.find((vendor) => vendor.id === vendorId);
 
   if (!selectedVendor) {
@@ -510,6 +577,7 @@ export async function finalizeVendorSelection(planId, vendorId) {
 
   const updatedPlan = {
     ...plan,
+    updatedAt: new Date().toISOString(),
     workflowState: "vendor-confirmed",
     communication: {
       ...plan.communication,
@@ -537,4 +605,36 @@ export async function finalizeVendorSelection(planId, vendorId) {
   };
 
   return persistPlan(updatedPlan);
+}
+
+export async function setPlanPaused(planId, paused) {
+  const plan = await getStoredPlan(planId);
+
+  if (!plan) {
+    return null;
+  }
+
+  const updatedPlan = {
+    ...plan,
+    updatedAt: new Date().toISOString(),
+    isPaused: Boolean(paused)
+  };
+
+  return persistPlan(updatedPlan);
+}
+
+export async function removePlan(planId) {
+  const plan = await getStoredPlan(planId);
+
+  if (!plan) {
+    return false;
+  }
+
+  plans.delete(planId);
+
+  if (isDbConfigured()) {
+    await deletePlan(planId);
+  }
+
+  return true;
 }

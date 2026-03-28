@@ -9,11 +9,11 @@ function trimTrailingSlash(value) {
   return trim(value).replace(/\/+$/, "");
 }
 
-function isTestModeEnabled() {
+export function isTestModeEnabled() {
   return isTestingStage() || trim(appConfig.emailClient.testMode).toLowerCase() === "true";
 }
 
-function resolveAppInbox() {
+export function resolveAppInbox() {
   return (
     trim(appConfig.emailClient.testRecipient) ||
     trim(appConfig.emailClient.replyTo) ||

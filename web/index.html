@@ -8,16 +8,52 @@
   </head>
   <body>
     <main class="shell">
-      <section class="hero">
-        <p class="eyebrow">AI Event Planner</p>
-        <h1>Plan the feeling first. The rest follows.</h1>
-        <p class="lede">
-          Describe the event, set the basics, and let the planner shape ideas and shortlist the right options.
-        </p>
+      <section class="topbar">
+        <div>
+          <p class="eyebrow">AI Event Planner</p>
+          <h1>Operations dashboard</h1>
+        </div>
+        <div class="topbar-badge">Workflow orchestration for live event plans</div>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="panel dashboard-panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Dashboard</p>
+              <h2>Tracked events</h2>
+            </div>
+          </div>
+          <div class="dashboard-summary">
+            <div class="metric-card">
+              <span class="metric-label">Total events</span>
+              <strong id="metric-total-events">0</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">Need action</span>
+              <strong id="metric-needs-action">0</strong>
+            </div>
+            <div class="metric-card">
+              <span class="metric-label">Paused</span>
+              <strong id="metric-paused">0</strong>
+            </div>
+          </div>
+          <div id="events-dashboard" class="events-dashboard"></div>
+        </div>
+
+        <section class="hero">
         <div id="system-status" class="system-status hidden"></div>
+        </section>
       </section>
 
       <section class="panel intake-panel">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">Composer</p>
+              <h2>Create or update event</h2>
+            </div>
+            <div id="editor-state" class="editor-state hidden"></div>
+          </div>
           <form id="planner-form" class="planner-form">
             <label class="field field-large">
               <span>What are you planning?</span>
@@ -49,6 +85,7 @@
 
             <div class="action-row">
               <button type="submit">Get ideas</button>
+              <button id="reset-editor-button" type="button" class="secondary hidden">Cancel edit</button>
               <button id="continue-button" type="button" class="secondary hidden">See recommendations</button>
             </div>
           </form>

@@ -50,3 +50,12 @@ export async function loadPlan(planId) {
   const result = await query("select data from event_plans where id = $1 limit 1", [planId]);
   return result.rows[0]?.data || null;
 }
+
+export async function listPlans() {
+  const result = await query("select data from event_plans order by created_at desc");
+  return result.rows.map((row) => row.data);
+}
+
+export async function deletePlan(planId) {
+  await query("delete from event_plans where id = $1", [planId]);
+}

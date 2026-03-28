@@ -2,7 +2,18 @@ import http from "node:http";
 import { getConfigStatus } from "./src/config/env.js";
 import { runMigrations } from "./src/migrations.js";
 import { validateMailgunSignature, validateWebhookToken } from "./src/email-client.js";
-import { analyzeIntake, createPlan, finalizeVendorSelection, getPlan, recordInboundReply, sendPlanInquiries } from "./src/planner.js";
+import {
+  analyzeIntake,
+  createPlan,
+  finalizeVendorSelection,
+  getPlan,
+  listAllPlans,
+  recordInboundReply,
+  removePlan,
+  sendPlanInquiries,
+  setPlanPaused,
+  updatePlan
+} from "./src/planner.js";
 
 const PORT = Number(process.env.PORT || 4000);
 
@@ -10,7 +21,7 @@ function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type"
   });
   response.end(JSON.stringify(payload, null, 2));
@@ -66,7 +77,7 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "OPTIONS") {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type"
     });
     response.end();
@@ -84,10 +95,27 @@ const server = http.createServer(async (request, response) => {
       });
     }
 
+    if (request.method === "GET" && path === "/api/plans") {
+      const plans = await listAllPlans();
+      return sendJson(response, 200, { items: plans });
+    }
+
     if (request.method === "POST" && path === "/api/plans") {
       const payload = await readJsonBody(request);
       const plan = await createPlan(payload);
       return sendJson(response, 201, plan);
+    }
+
+    if (request.method === "PUT" && path.startsWith("/api/plans/")) {
+      const planId = path.replace("/api/plans/", "");
+      const payload = await readJsonBody(request);
+      const plan = await updatePlan(planId, payload);
+
+      if (!plan) {
+        return sendJson(response, 404, { error: "Plan not found" });
+      }
+
+      return sendJson(response, 200, plan);
     }
 
     if (request.method === "POST" && path === "/api/intake") {
@@ -107,12 +135,28 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, plan);
     }
 
+    if (request.method === "PATCH" && path.endsWith("/pause")) {
+      const [, , , planId] = path.split("/");
+      const payload = await readJsonBody(request);
+      const plan = await setPlanPaused(planId, payload.paused);
+
+      if (!plan) {
+        return sendJson(response, 404, { error: "Plan not found" });
+      }
+
+      return sendJson(response, 200, plan);
+    }
+
     if (request.method === "POST" && path.endsWith("/send-inquiries")) {
       const [, , , planId] = path.split("/");
       const result = await sendPlanInquiries(planId);
 
       if (!result) {
         return sendJson(response, 404, { error: "Plan not found" });
+      }
+
+      if (result.error) {
+        return sendJson(response, 400, result);
       }
 
       return sendJson(response, 200, result);
@@ -132,6 +176,17 @@ const server = http.createServer(async (request, response) => {
       }
 
       return sendJson(response, 200, result);
+    }
+
+    if (request.method === "DELETE" && path.startsWith("/api/plans/")) {
+      const planId = path.replace("/api/plans/", "");
+      const removed = await removePlan(planId);
+
+      if (!removed) {
+        return sendJson(response, 404, { error: "Plan not found" });
+      }
+
+      return sendJson(response, 200, { ok: true, planId });
     }
 
     if (request.method === "POST" && path === "/api/webhooks/mailgun/inbound") {
