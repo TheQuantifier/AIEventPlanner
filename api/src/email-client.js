@@ -1,4 +1,4 @@
-import { appConfig } from "./config/env.js";
+import { appConfig, isTestingStage } from "./config/env.js";
 import crypto from "node:crypto";
 
 function trim(value) {
@@ -10,22 +10,32 @@ function trimTrailingSlash(value) {
 }
 
 function isTestModeEnabled() {
-  return trim(appConfig.emailClient.testMode).toLowerCase() === "true";
+  return isTestingStage() || trim(appConfig.emailClient.testMode).toLowerCase() === "true";
+}
+
+function resolveAppInbox() {
+  return (
+    trim(appConfig.emailClient.testRecipient) ||
+    trim(appConfig.emailClient.replyTo) ||
+    trim(appConfig.emailClient.senderEmail)
+  );
 }
 
 function resolveRecipient(to) {
   if (!isTestModeEnabled()) {
     return {
       intendedRecipient: to,
-      deliveryRecipient: to
+      deliveryRecipient: to,
+      deliveryMode: "direct-to-vendor"
     };
   }
 
-  const testRecipient = trim(appConfig.emailClient.testRecipient);
+  const appInbox = resolveAppInbox();
 
   return {
     intendedRecipient: to,
-    deliveryRecipient: testRecipient || to
+    deliveryRecipient: appInbox || to,
+    deliveryMode: "rerouted-to-app-inbox"
   };
 }
 
@@ -57,7 +67,15 @@ export async function sendEmail({ to, subject, text, replyTo, tags = [] }) {
     };
   }
 
-  const { intendedRecipient, deliveryRecipient } = resolveRecipient(to);
+  if (isTestModeEnabled() && !resolveAppInbox()) {
+    return {
+      ok: false,
+      skipped: true,
+      reason: "testing delivery requires EMAIL_CLIENT_TEST_RECIPIENT, EMAIL_CLIENT_REPLY_TO, or EMAIL_CLIENT_SENDER_EMAIL"
+    };
+  }
+
+  const { intendedRecipient, deliveryRecipient, deliveryMode } = resolveRecipient(to);
   const form = new URLSearchParams();
   form.set("from", `${appConfig.emailClient.senderName || "AI Event Planner"} <${appConfig.emailClient.senderEmail}>`);
   form.set("to", deliveryRecipient);
@@ -99,7 +117,10 @@ export async function sendEmail({ to, subject, text, replyTo, tags = [] }) {
     messageId: data.id || null,
     intendedRecipient,
     deliveredTo: deliveryRecipient,
-    testMode: isTestModeEnabled()
+    deliveryMode,
+    appInbox: resolveAppInbox() || null,
+    testMode: isTestModeEnabled(),
+    stage: appConfig.app.stage
   };
 }
 

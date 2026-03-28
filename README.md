@@ -5,6 +5,7 @@ Minimal split-stack prototype for an autonomous event-planning workflow.
 ## What it does
 
 - Web app collects a user brief, budget, location, dates, and guest count.
+- Web app shows the current deployment stage and whether vendor emails are being rerouted for safe testing.
 - Gemini analyzes the event brief, theme, and missing details during intake.
 - Gemini can suggest event directions and research vendor/location options when needed.
 - API drafts inquiry emails for the top three vendors and exposes them to the web app.
@@ -53,6 +54,7 @@ The repo includes both `.env` and `.env.example` with provider-agnostic names so
 - `AI_PROVIDER`
 - `AI_API_KEY`
 - `AI_MODEL`
+- `APP_STAGE`
 - `APP_BASE_URL`
 - `API_BASE_URL`
 
@@ -69,14 +71,15 @@ UI notes:
 
 Mailgun notes:
 
+- Set `APP_STAGE=testing` to force all outbound vendor email to an app-controlled inbox instead of real vendors
 - Set `EMAIL_CLIENT_API_BASE` to `https://api.mailgun.net` or your regional Mailgun API host
 - Set `EMAIL_CLIENT_DOMAIN` to your Mailgun sending domain
 - Set `EMAIL_CLIENT_SENDER_EMAIL` to your authenticated sender, for example `client@manuswebworks.org`
 - Set `EMAIL_CLIENT_INBOUND_DOMAIN` to your inbound subdomain, for example `reply.manuswebworks.org`
 - Set `EMAIL_CLIENT_WEBHOOK_SECRET` and configure the Mailgun route to call `/api/webhooks/mailgun/inbound?token=YOUR_SECRET`
 - Set `EMAIL_CLIENT_WEBHOOK_SIGNING_KEY` to the Mailgun webhook signing key so inbound requests can be verified
-- Set `EMAIL_CLIENT_TEST_MODE=true` when you want all outbound mail redirected to one inbox
-- Set `EMAIL_CLIENT_TEST_RECIPIENT=jhandalex100@gmail.com` or another inbox you control for testing
+- Set `EMAIL_CLIENT_TEST_MODE=true` if you want inbox rerouting outside the dedicated testing stage
+- Set `EMAIL_CLIENT_TEST_RECIPIENT=jhandalex100@gmail.com` or another inbox you control for testing; in `testing` stage this becomes the delivery target for all vendor email
 - Set `APP_BASE_URL` to the public base URL of your deployed API, for example `https://api.manuswebworks.org`
 - The app generates a per-plan reply-to address like `plan-abc123@reply.manuswebworks.org`
 
@@ -84,6 +87,7 @@ Render notes:
 
 - Deploy the API service with `npm start`
 - Deploy the web service with `npm run start:web`
+- Set `APP_STAGE=testing` on both services until you are ready for real vendor delivery
 - Set `APP_BASE_URL` on the API service to the API's public Render URL or custom domain
 - Set `API_BASE_URL` on the web service to that same API URL so the browser talks to the correct backend
 - Render injects environment variables directly, so production start commands should not depend on a local `.env` file

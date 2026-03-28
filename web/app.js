@@ -3,6 +3,7 @@ const apiBaseUrl = window.AI_EVENT_PLANNER_CONFIG?.apiBaseUrl || "http://localho
 const form = document.querySelector("#planner-form");
 const continueButton = document.querySelector("#continue-button");
 const intakeResults = document.querySelector("#intake-results");
+const systemStatus = document.querySelector("#system-status");
 const assistantMessage = document.querySelector("#assistant-message");
 const detectedType = document.querySelector("#detected-type");
 const followUpQuestions = document.querySelector("#follow-up-questions");
@@ -12,11 +13,29 @@ const suggestions = document.querySelector("#suggestions");
 const sendInquiriesButton = document.querySelector("#send-inquiries-button");
 const outreachStatus = document.querySelector("#outreach-status");
 const shortlist = document.querySelector("#shortlist");
+const messageLog = document.querySelector("#message-log");
+const inboundLog = document.querySelector("#inbound-log");
 const selectionStatus = document.querySelector("#selection-status");
 
 let currentPlan = null;
-let latestPayload = null;
-let latestIntake = null;
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatDate(value) {
+  if (!value) {
+    return "";
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
+}
 
 function currency(value) {
   return new Intl.NumberFormat("en-US", {
@@ -24,6 +43,41 @@ function currency(value) {
     currency: "USD",
     maximumFractionDigits: 0
   }).format(value);
+}
+
+function renderSystemStatus(integrations) {
+  if (!integrations) {
+    systemStatus.classList.add("hidden");
+    systemStatus.innerHTML = "";
+    return;
+  }
+
+  const stage = integrations.app?.stage || "development";
+  const deliveryMode = integrations.emailClient?.deliveryMode || "unknown";
+  const mailbox = integrations.emailClient?.testRecipient || "not configured";
+  const stageClass = integrations.app?.testing ? "status-card status-card-warning" : "status-card";
+
+  systemStatus.classList.remove("hidden");
+  systemStatus.innerHTML = `
+    <div class="${stageClass}">
+      <strong>Stage: ${escapeHtml(stage)}</strong><br>
+      ${integrations.app?.testing ? `Outbound vendor email is rerouted to the app inbox: ${escapeHtml(mailbox)}.` : "Outbound vendor email is configured for direct delivery."}
+    </div>
+    <div class="status-grid">
+      <div class="status-card">
+        <strong>Email</strong><br>
+        ${escapeHtml(integrations.emailClient?.configured ? deliveryMode : "not configured")}
+      </div>
+      <div class="status-card">
+        <strong>Database</strong><br>
+        ${integrations.db?.configured ? escapeHtml(integrations.db.provider || "configured") : "not configured"}
+      </div>
+      <div class="status-card">
+        <strong>AI</strong><br>
+        ${integrations.ai?.configured ? escapeHtml(integrations.ai.provider || "configured") : "using fallback planner"}
+      </div>
+    </div>
+  `;
 }
 
 function renderSuggestions(items) {
@@ -92,7 +146,8 @@ function renderSelectionStatus(plan) {
   selectionStatus.classList.remove("hidden");
   selectionStatus.innerHTML = `
     <h2>Selection saved</h2>
-    <p>${plan.finalSelection.vendorName || "Your chosen option"} is marked as the preferred fit for this event.</p>
+    <p>${escapeHtml(plan.finalSelection.vendorName || "Your chosen option")} is marked as the preferred fit for this event.</p>
+    <p class="fine-print">Confirmation created ${escapeHtml(formatDate(plan.finalSelection.selectedAt))}.</p>
   `;
 }
 
@@ -109,18 +164,58 @@ function renderOutreachStatus(plan) {
   outreachStatus.innerHTML = inquiries
     .map((message) => {
       const vendorName = plan.shortlist.find((vendor) => vendor.id === message.vendorId)?.name || message.vendorId;
+      const intendedRecipient = message.delivery?.intendedRecipient || message.intendedRecipient || "unknown";
+      const deliveredTo = message.delivery?.deliveredTo || message.deliveredTo || intendedRecipient;
       return `
         <div class="follow-up-item">
-          <strong>${vendorName}</strong><br>
+          <strong>${escapeHtml(vendorName)}</strong><br>
           ${
             message.delivery.ok
-              ? `Outreach has started.`
+              ? `Outreach sent to ${escapeHtml(deliveredTo)}.${deliveredTo !== intendedRecipient ? ` Intended vendor: ${escapeHtml(intendedRecipient)}.` : ""}`
               : `This option could not be contacted yet.`
           }
         </div>
       `;
     })
     .join("");
+}
+
+function renderCommunicationLog(plan) {
+  const outboundMessages = plan.communication?.outboundMessages || [];
+  const inboundMessages = plan.communication?.inboundMessages || [];
+
+  messageLog.innerHTML = outboundMessages.length
+    ? outboundMessages
+        .map((message) => {
+          const vendorName = plan.shortlist.find((vendor) => vendor.id === message.vendorId)?.name || message.vendorId || "Vendor";
+          return `
+            <div class="follow-up-item">
+              <strong>${escapeHtml(message.type === "confirmation" ? "Confirmation" : "Inquiry")} · ${escapeHtml(vendorName)}</strong><br>
+              ${escapeHtml(message.subject || "No subject")}<br>
+              <span class="fine-print">${escapeHtml(formatDate(message.createdAt))}</span><br>
+              <span class="fine-print">Delivered to: ${escapeHtml(message.delivery?.deliveredTo || message.deliveredTo || "not sent")}</span>
+              ${message.delivery?.intendedRecipient && message.delivery?.intendedRecipient !== message.delivery?.deliveredTo ? `<br><span class="fine-print">Intended vendor: ${escapeHtml(message.delivery.intendedRecipient)}</span>` : ""}
+            </div>
+          `;
+        })
+        .join("")
+    : `<div class="follow-up-item">No outbound email has been sent yet.</div>`;
+
+  inboundLog.innerHTML = inboundMessages.length
+    ? inboundMessages
+        .map((message) => {
+          const vendorName = plan.shortlist.find((vendor) => vendor.id === message.vendorId)?.name || message.from || "Unknown sender";
+          return `
+            <div class="follow-up-item">
+              <strong>Reply · ${escapeHtml(vendorName)}</strong><br>
+              ${escapeHtml(message.subject || "No subject")}<br>
+              <span class="fine-print">${escapeHtml(formatDate(message.receivedAt))}</span>
+              <p>${escapeHtml(message.text || "No message body supplied.")}</p>
+            </div>
+          `;
+        })
+        .join("")
+    : `<div class="follow-up-item">No vendor replies have been recorded yet.</div>`;
 }
 
 async function finalizeVendor(vendorId) {
@@ -143,6 +238,8 @@ async function finalizeVendor(vendorId) {
   currentPlan = await response.json();
   renderOutreachStatus(currentPlan);
   renderSelectionStatus(currentPlan);
+  renderCommunicationLog(currentPlan);
+  renderShortlist(currentPlan);
 }
 
 async function sendInquiries() {
@@ -164,6 +261,7 @@ async function sendInquiries() {
   currentPlan = await response.json();
   renderShortlist(currentPlan);
   renderOutreachStatus(currentPlan);
+  renderCommunicationLog(currentPlan);
 }
 
 function renderShortlist(plan) {
@@ -174,17 +272,28 @@ function renderShortlist(plan) {
           <div class="vendor-topline">
             <div>
               <p class="eyebrow">Option ${vendor.rank}</p>
-              <h3>${vendor.name}</h3>
+              <h3>${escapeHtml(vendor.name)}</h3>
             </div>
-            <strong>${currency(vendor.estimatedQuote)}</strong>
+            <div class="vendor-price-block">
+              <strong>${currency(vendor.estimatedQuote)}</strong>
+              <span class="status-pill status-${escapeHtml(vendor.status)}">${escapeHtml(vendor.status)}</span>
+            </div>
           </div>
           <div class="vendor-meta">
-            <span>${vendor.category}</span>
-            <span>${vendor.serviceArea.join(", ")}</span>
-            <span>${vendor.rating}/5</span>
+            <span>${escapeHtml(vendor.category)}</span>
+            <span>${escapeHtml(vendor.serviceArea.join(", "))}</span>
+            <span>${escapeHtml(vendor.rating)}/5</span>
+            <span>Score ${escapeHtml(vendor.score)}</span>
           </div>
-          <p>${vendor.summary}</p>
-          <button type="button" data-vendor-id="${vendor.id}">Choose this option</button>
+          <p>${escapeHtml(vendor.summary)}</p>
+          <p class="fine-print">Primary contact: ${escapeHtml(vendor.email)}</p>
+          <details class="email-preview">
+            <summary>Preview inquiry email</summary>
+            <p class="fine-print">To: ${escapeHtml(vendor.inquiryEmail.to)}</p>
+            <p class="fine-print">Subject: ${escapeHtml(vendor.inquiryEmail.subject)}</p>
+            <pre>${escapeHtml(vendor.inquiryEmail.body)}</pre>
+          </details>
+          <button type="button" data-vendor-id="${vendor.id}" ${plan.finalSelection?.vendorId === vendor.id ? "disabled" : ""}>${plan.finalSelection?.vendorId === vendor.id ? "Chosen" : "Choose this option"}</button>
         </article>
       `
     )
@@ -223,6 +332,21 @@ async function analyzeEvent(payload) {
   return response.json();
 }
 
+async function loadSystemStatus() {
+  try {
+    const response = await fetch(`${apiBaseUrl}/health`);
+
+    if (!response.ok) {
+      throw new Error("Status request failed");
+    }
+
+    const payload = await response.json();
+    renderSystemStatus(payload.integrations);
+  } catch {
+    renderSystemStatus(null);
+  }
+}
+
 async function generatePlan(payload) {
   const response = await fetch(`${apiBaseUrl}/api/plans`, {
     method: "POST",
@@ -242,10 +366,10 @@ async function generatePlan(payload) {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  latestPayload = readPayload();
+  const latestPayload = readPayload();
 
   try {
-    latestIntake = await analyzeEvent(latestPayload);
+    const latestIntake = await analyzeEvent(latestPayload);
     renderIntake(latestIntake);
     results.classList.add("hidden");
   } catch (error) {
@@ -254,7 +378,7 @@ form.addEventListener("submit", async (event) => {
 });
 
 continueButton.addEventListener("click", async () => {
-  latestPayload = readPayload();
+  const latestPayload = readPayload();
 
   try {
     currentPlan = await generatePlan(latestPayload);
@@ -277,6 +401,7 @@ continueButton.addEventListener("click", async () => {
   renderOutreachStatus(currentPlan);
   renderShortlist(currentPlan);
   renderSelectionStatus(currentPlan);
+  renderCommunicationLog(currentPlan);
   sendInquiriesButton.disabled = false;
   sendInquiriesButton.textContent = "Start outreach";
   sendInquiriesButton.classList.remove("hidden");
@@ -296,3 +421,5 @@ sendInquiriesButton.addEventListener("click", async () => {
     alert(error.message);
   }
 });
+
+loadSystemStatus();

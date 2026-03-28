@@ -36,6 +36,32 @@ body {
   padding: 12px 0 28px;
 }
 
+.system-status {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.status-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.status-card {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(10px);
+  line-height: 1.5;
+}
+
+.status-card-warning {
+  background: #fff7e7;
+  border-color: #efd7a3;
+}
+
 .eyebrow {
   margin: 0 0 12px;
   text-transform: uppercase;
@@ -233,6 +259,61 @@ button:hover {
 .vendor-meta {
   margin: 12px 0;
   color: var(--muted);
+}
+
+.vendor-price-block {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  text-transform: capitalize;
+  background: var(--accent-soft);
+  border: 1px solid var(--line);
+}
+
+.status-contacted,
+.status-replied {
+  background: #eef8ef;
+  border-color: #cddfce;
+}
+
+.status-available {
+  background: #f6f2e9;
+  border-color: #e6dcc8;
+}
+
+.fine-print {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.email-preview {
+  margin: 16px 0;
+}
+
+.email-preview summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.email-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 12px 0 0;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--muted);
+  font-family: inherit;
+  line-height: 1.6;
 }
 
 @media (max-width: 700px) {

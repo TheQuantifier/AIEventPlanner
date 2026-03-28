@@ -184,6 +184,23 @@ function buildFallbackShortlist(event) {
     .slice(0, 3);
 }
 
+function buildShortlistFromCatalog(event, replyTo) {
+  return buildFallbackShortlist(event).map((vendor, index) => ({
+    id: vendor.id,
+    rank: index + 1,
+    name: vendor.name,
+    category: vendor.category,
+    rating: vendor.rating,
+    score: vendor.score,
+    estimatedQuote: vendor.estimatedQuote,
+    serviceArea: vendor.serviceArea,
+    summary: vendor.summary,
+    status: vendor.status,
+    email: vendor.email,
+    inquiryEmail: buildInquiryEmail({ event, vendor, replyTo })
+  }));
+}
+
 function coerceEvent(payload, eventData = {}) {
   const budget = Number(eventData.budget);
   const guestCount = Number(eventData.guestCount);
@@ -255,37 +272,19 @@ export async function createPlan(payload) {
       shortlist = normalizeShortlist(Array.isArray(aiResult.shortlist) ? aiResult.shortlist : [], event, replyTo);
     } catch {
       event = buildFallbackEvent(payload);
-      shortlist = buildFallbackShortlist(event).map((vendor, index) => ({
-        id: vendor.id,
-        rank: index + 1,
-        name: vendor.name,
-        category: vendor.category,
-        rating: vendor.rating,
-        score: vendor.score,
-        estimatedQuote: vendor.estimatedQuote,
-        serviceArea: vendor.serviceArea,
-        summary: vendor.summary,
-        status: vendor.status,
-        email: vendor.email,
-        inquiryEmail: buildInquiryEmail({ event, vendor, replyTo })
-      }));
+      shortlist = buildShortlistFromCatalog(event, replyTo);
     }
   } else {
     event = buildFallbackEvent(payload);
-    shortlist = buildFallbackShortlist(event).map((vendor, index) => ({
-      id: vendor.id,
-      rank: index + 1,
-      name: vendor.name,
-      category: vendor.category,
-      rating: vendor.rating,
-      score: vendor.score,
-      estimatedQuote: vendor.estimatedQuote,
-      serviceArea: vendor.serviceArea,
-      summary: vendor.summary,
-      status: vendor.status,
-      email: vendor.email,
-      inquiryEmail: buildInquiryEmail({ event, vendor, replyTo })
-    }));
+    shortlist = buildShortlistFromCatalog(event, replyTo);
+  }
+
+  if (shortlist.length === 0) {
+    if (!event) {
+      event = buildFallbackEvent(payload);
+    }
+
+    shortlist = buildShortlistFromCatalog(event, replyTo);
   }
 
   const plan = {
@@ -337,6 +336,13 @@ export async function sendPlanInquiries(planId) {
   const updatedShortlist = [];
 
   for (const vendor of plan.shortlist) {
+    const alreadyContacted = outboundMessages.some((message) => message.type === "inquiry" && message.vendorId === vendor.id);
+
+    if (alreadyContacted) {
+      updatedShortlist.push(vendor);
+      continue;
+    }
+
     const delivery = await deliverEmail({
       to: vendor.inquiryEmail.to,
       subject: vendor.inquiryEmail.subject,
@@ -350,6 +356,9 @@ export async function sendPlanInquiries(planId) {
       type: "inquiry",
       vendorId: vendor.id,
       createdAt: new Date().toISOString(),
+      subject: vendor.inquiryEmail.subject,
+      intendedRecipient: delivery.intendedRecipient || vendor.inquiryEmail.to,
+      deliveredTo: delivery.deliveredTo || null,
       delivery
     });
 
@@ -511,6 +520,9 @@ export async function finalizeVendorSelection(planId, vendorId) {
           type: "confirmation",
           vendorId: selectedVendor.id,
           createdAt: new Date().toISOString(),
+          subject: confirmationEmail.subject,
+          intendedRecipient: delivery.intendedRecipient || confirmationEmail.to,
+          deliveredTo: delivery.deliveredTo || null,
           delivery
         }
       ]

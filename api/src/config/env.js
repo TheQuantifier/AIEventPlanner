@@ -2,7 +2,22 @@ function read(name, fallback = "") {
   return process.env[name] || fallback;
 }
 
+function trim(value) {
+  return String(value || "").trim();
+}
+
+export function getAppStage() {
+  return trim(read("APP_STAGE", "development")).toLowerCase() || "development";
+}
+
+export function isTestingStage() {
+  return getAppStage() === "testing";
+}
+
 export const appConfig = {
+  app: {
+    stage: getAppStage()
+  },
   emailClient: {
     provider: read("EMAIL_CLIENT_PROVIDER"),
     apiKey: read("EMAIL_CLIENT_API_KEY"),
@@ -30,12 +45,21 @@ export const appConfig = {
 };
 
 export function getConfigStatus() {
+  const emailTestMode = String(appConfig.emailClient.testMode).toLowerCase() === "true";
+  const testingStage = isTestingStage();
+
   return {
+    app: {
+      stage: appConfig.app.stage,
+      testing: testingStage
+    },
     emailClient: {
       provider: appConfig.emailClient.provider || "unset",
       configured: Boolean(appConfig.emailClient.apiKey && appConfig.emailClient.senderEmail && appConfig.emailClient.domain),
       inboundConfigured: Boolean(appConfig.emailClient.inboundDomain),
-      testMode: String(appConfig.emailClient.testMode).toLowerCase() === "true"
+      testMode: emailTestMode,
+      deliveryMode: testingStage || emailTestMode ? "rerouted-to-app-inbox" : "direct-to-vendors",
+      testRecipient: trim(appConfig.emailClient.testRecipient) || trim(appConfig.emailClient.replyTo) || trim(appConfig.emailClient.senderEmail) || "unset"
     },
     db: {
       provider: appConfig.db.provider || "unset",

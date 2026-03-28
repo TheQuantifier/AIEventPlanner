@@ -5,6 +5,8 @@ services:
     buildCommand: npm install
     startCommand: npm start
     envVars:
+      - key: APP_STAGE
+        value: testing
       - key: EMAIL_CLIENT_PROVIDER
         sync: false
       - key: EMAIL_CLIENT_API_KEY
@@ -50,5 +52,7 @@ services:
     buildCommand: npm install
     startCommand: npm run start:web
     envVars:
+      - key: APP_STAGE
+        value: testing
       - key: API_BASE_URL
         sync: false
