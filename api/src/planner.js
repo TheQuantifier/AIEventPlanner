@@ -188,8 +188,17 @@ function buildFallbackEvent(payload) {
 }
 
 function buildFallbackShortlist(event) {
-  return vendorCatalog
-    .filter((vendor) => vendorMatches(vendor, event))
+  const strictMatches = vendorCatalog.filter((vendor) => vendorMatches(vendor, event));
+  const relaxedMatches =
+    strictMatches.length > 0
+      ? strictMatches
+      : vendorCatalog.filter((vendor) => {
+          const eventTypeMatch = vendor.eventTypes.includes(event.type) || event.type === "custom-event";
+          const capacityMatch = vendor.capacity >= event.guestCount;
+          return eventTypeMatch && capacityMatch;
+        });
+
+  return relaxedMatches
     .map((vendor) => ({
       ...vendor,
       score: scoreVendor(vendor, event),

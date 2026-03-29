@@ -211,7 +211,30 @@ function DashboardSection({ plans, onEdit, onPause, onDelete }) {
   );
 }
 
-function IntakeSection({ formData, onChange, onAnalyze, onContinue, onResetEdit, intake, editingPlanId, currentPlan, analyzing, savingPlan }) {
+function EventDetailsForm({ formData, onChange, onSubmit, primaryLabel, secondaryLabel, onSecondary, disabled, children }) {
+  return (
+    <form className="planner-form" onSubmit={onSubmit}>
+      <label className="field field-large">
+        <span>What are you planning?</span>
+        <textarea name="brief" value={formData.brief} onChange={onChange} placeholder="Example: I want a stylish company dinner for 80 people in Chicago this fall." />
+      </label>
+      <div className="grid">
+        <label className="field"><span>Budget</span><input name="budget" value={formData.budget} onChange={onChange} placeholder="$12,000" /></label>
+        <label className="field"><span>Location</span><input name="location" value={formData.location} onChange={onChange} placeholder="Chicago" /></label>
+        <label className="field"><span>Dates</span><input name="dates" value={formData.dates} onChange={onChange} placeholder="June 10 to June 14" /></label>
+        <label className="field"><span>Theme</span><input name="theme" value={formData.theme} onChange={onChange} placeholder="Minimal, garden party, modern luxury" /></label>
+        <label className="field"><span>Guest count</span><input name="guestCount" type="number" min="1" value={formData.guestCount} onChange={onChange} placeholder="100" /></label>
+      </div>
+      <div className="action-row">
+        <button type="submit" disabled={disabled}>{primaryLabel}</button>
+        {secondaryLabel ? <button type="button" className="secondary" onClick={onSecondary}>{secondaryLabel}</button> : null}
+        {children}
+      </div>
+    </form>
+  );
+}
+
+function IntakeSection({ formData, onChange, onAnalyze, onResetEdit, intake, editingPlanId, currentPlan, analyzing, onAdvance, advanceDisabled }) {
   return (
     <>
       <section className="panel intake-panel">
@@ -222,40 +245,28 @@ function IntakeSection({ formData, onChange, onAnalyze, onContinue, onResetEdit,
           </div>
           {editingPlanId ? <div className="editor-state">Editing {currentPlan?.event?.type || "event"} | {editingPlanId}</div> : null}
         </div>
-        <form className="planner-form" onSubmit={onAnalyze}>
-          <label className="field field-large">
-            <span>What are you planning?</span>
-            <textarea name="brief" value={formData.brief} onChange={onChange} placeholder="Example: I want a stylish company dinner for 80 people in Chicago this fall." />
-          </label>
-          <div className="grid">
-            <label className="field"><span>Budget</span><input name="budget" value={formData.budget} onChange={onChange} placeholder="$12,000" /></label>
-            <label className="field"><span>Location</span><input name="location" value={formData.location} onChange={onChange} placeholder="Chicago" /></label>
-            <label className="field"><span>Dates</span><input name="dates" value={formData.dates} onChange={onChange} placeholder="June 10 to June 14" /></label>
-            <label className="field"><span>Theme</span><input name="theme" value={formData.theme} onChange={onChange} placeholder="Minimal, garden party, modern luxury" /></label>
-            <label className="field"><span>Guest count</span><input name="guestCount" type="number" min="1" value={formData.guestCount} onChange={onChange} placeholder="100" /></label>
-          </div>
-          <div className="action-row">
-            <button type="submit" disabled={analyzing}>{analyzing ? "Analyzing..." : "Get ideas"}</button>
-            {editingPlanId ? <button type="button" className="secondary" onClick={onResetEdit}>Cancel edit</button> : null}
-            {intake?.readiness === "ready-for-research" ? (
-              <button type="button" className="secondary" disabled={savingPlan} onClick={onContinue}>
-                {savingPlan ? "Saving..." : "See recommendations"}
-              </button>
-            ) : null}
-          </div>
-        </form>
+        <EventDetailsForm
+          formData={formData}
+          onChange={onChange}
+          onSubmit={onAnalyze}
+          primaryLabel={analyzing ? "Analyzing..." : "Get ideas"}
+          secondaryLabel={editingPlanId ? "Cancel edit" : null}
+          onSecondary={onResetEdit}
+          disabled={analyzing}
+        >
+          {intake?.readiness === "ready-for-research" ? (
+            <button type="button" className="secondary" disabled={advanceDisabled} onClick={onAdvance}>
+              Continue to plan
+            </button>
+          ) : null}
+        </EventDetailsForm>
       </section>
       {intake ? (
         <section className="panel">
-          <h2>Planner notes</h2>
-          <div className="summary"><p>{intake.assistantMessage}</p></div>
-          <div className="suggestions">
-            <span className="chip">Detected event type: {intake.eventType}</span>
-            {intake.suggestions.map((item) => <span key={item} className="chip">{item}</span>)}
-          </div>
+          <h2>Next details</h2>
           <div className="follow-up-list">
             {intake.followUpQuestions.length === 0
-              ? <div className="follow-up-item">All required intake details are present. You can continue to vendor research.</div>
+              ? <div className="follow-up-item">All required intake details are present. You can continue to event direction.</div>
               : intake.followUpQuestions.map((item) => (
                   <div key={`${item.field}-${item.question}`} className="follow-up-item">
                     <strong>{item.field}</strong><br />{item.question}
@@ -268,23 +279,44 @@ function IntakeSection({ formData, onChange, onAnalyze, onContinue, onResetEdit,
   );
 }
 
-function ResultsSection({ plan, onSendInquiries, onFinalizeVendor, sendingInquiries }) {
+function DirectionSection({ plan, intake, formData, onChange, onSave, savingPlan, onSendInquiries, sendingInquiries }) {
   if (!plan) return null;
 
   const inquiries = plan.communication?.outboundMessages?.filter((message) => message.type === "inquiry") || [];
-  const outboundMessages = plan.communication?.outboundMessages || [];
-  const inboundMessages = plan.communication?.inboundMessages || [];
   const alreadySent = inquiries.length > 0;
 
   return (
     <section className="results">
+      {intake ? (
+        <div className="panel">
+          <h2>Planner notes</h2>
+          <div className="summary"><p>{intake.assistantMessage}</p></div>
+          <div className="suggestions">
+            <span className="chip">Detected event type: {intake.eventType}</span>
+            {intake.suggestions.map((item) => <span key={item} className="chip">{item}</span>)}
+          </div>
+        </div>
+      ) : null}
       <div className="panel">
-        <h2>Your event direction</h2>
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Event direction</p>
+            <h2>Your event direction</h2>
+          </div>
+          <div className="editor-state">Edit details below to refine recommendations.</div>
+        </div>
         <div className="summary">
           {buildPlanSummary(plan).map(([label, value]) => <p key={label}><strong>{label}:</strong> {value}</p>)}
           {plan.event.plannerSummary ? <p>{plan.event.plannerSummary}</p> : null}
         </div>
         {plan.event.suggestions?.length ? <div className="suggestions">{plan.event.suggestions.map((item) => <span key={item} className="chip">{item}</span>)}</div> : null}
+        <EventDetailsForm
+          formData={formData}
+          onChange={onChange}
+          onSubmit={onSave}
+          primaryLabel={savingPlan ? "Saving..." : "Save updates"}
+          disabled={savingPlan}
+        />
         <div className="action-row section-actions">
           <button type="button" disabled={plan.isPaused || alreadySent || sendingInquiries} onClick={onSendInquiries}>
             {plan.isPaused ? "Event paused" : sendingInquiries ? "Sending inquiries..." : alreadySent ? "Outreach already handled" : "Start outreach"}
@@ -301,31 +333,57 @@ function ResultsSection({ plan, onSendInquiries, onFinalizeVendor, sendingInquir
           </div>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+function MatchesSection({ plan, onFinalizeVendor }) {
+  if (!plan) return null;
+  const shortlist = Array.isArray(plan.shortlist) ? plan.shortlist : [];
+
+  return (
+    <section className="results">
       <div className="panel">
         <h2>Recommended matches</h2>
-        <div className="shortlist">
-          {plan.shortlist.map((vendor) => (
-            <article key={vendor.id} className="vendor-card">
-              <div className="vendor-topline">
-                <div><p className="eyebrow">Option {vendor.rank}</p><h3>{vendor.name}</h3></div>
-                <div className="vendor-price-block"><strong>{currency(vendor.estimatedQuote)}</strong><span className={`status-pill status-${vendor.status}`}>{vendor.status}</span></div>
-              </div>
-              <div className="vendor-meta"><span>{vendor.category}</span><span>{vendor.serviceArea.join(", ")}</span><span>{vendor.rating}/5</span><span>Score {vendor.score}</span></div>
-              <p>{vendor.summary}</p>
-              <p className="fine-print">Primary contact: {vendor.email}</p>
-              <details className="email-preview">
-                <summary>Preview inquiry email</summary>
-                <p className="fine-print">To: {vendor.inquiryEmail.to}</p>
-                <p className="fine-print">Subject: {vendor.inquiryEmail.subject}</p>
-                <pre>{vendor.inquiryEmail.body}</pre>
-              </details>
-              <button type="button" disabled={plan.finalSelection?.vendorId === vendor.id || plan.isPaused} onClick={() => onFinalizeVendor(vendor.id)}>
-                {plan.finalSelection?.vendorId === vendor.id ? "Chosen" : "Choose this option"}
-              </button>
-            </article>
-          ))}
-        </div>
+        {shortlist.length === 0 ? (
+          <div className="follow-up-item">No recommended matches yet. Save the event direction to generate options.</div>
+        ) : (
+          <div className="shortlist">
+            {shortlist.map((vendor) => (
+              <article key={vendor.id} className="vendor-card">
+                <div className="vendor-topline">
+                  <div><p className="eyebrow">Option {vendor.rank}</p><h3>{vendor.name}</h3></div>
+                  <div className="vendor-price-block"><strong>{currency(vendor.estimatedQuote)}</strong><span className={`status-pill status-${vendor.status}`}>{vendor.status}</span></div>
+                </div>
+                <div className="vendor-meta"><span>{vendor.category}</span><span>{vendor.serviceArea.join(", ")}</span><span>{vendor.rating}/5</span><span>Score {vendor.score}</span></div>
+                <p>{vendor.summary}</p>
+                <p className="fine-print">Primary contact: {vendor.email}</p>
+                <details className="email-preview">
+                  <summary>Preview inquiry email</summary>
+                  <p className="fine-print">To: {vendor.inquiryEmail.to}</p>
+                  <p className="fine-print">Subject: {vendor.inquiryEmail.subject}</p>
+                  <pre>{vendor.inquiryEmail.body}</pre>
+                </details>
+                <button type="button" disabled={plan.finalSelection?.vendorId === vendor.id || plan.isPaused} onClick={() => onFinalizeVendor(vendor.id)}>
+                  {plan.finalSelection?.vendorId === vendor.id ? "Chosen" : "Choose this option"}
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
+    </section>
+  );
+}
+
+function CommunicationSection({ plan }) {
+  if (!plan) return null;
+
+  const outboundMessages = plan.communication?.outboundMessages || [];
+  const inboundMessages = plan.communication?.inboundMessages || [];
+
+  return (
+    <section className="results">
       <div className="panel">
         <h2>Communication log</h2>
         <div className="follow-up-list">
@@ -370,6 +428,7 @@ export default function App() {
   const [analyzing, setAnalyzing] = useState(false);
   const [savingPlan, setSavingPlan] = useState(false);
   const [sendingInquiries, setSendingInquiries] = useState(false);
+  const [activeStep, setActiveStep] = useState(0);
 
   useEffect(() => {
     loadDashboardPlans();
@@ -430,6 +489,7 @@ export default function App() {
       setCurrentPlan(plan);
       setEditingPlanId(plan.id);
       upsertPlan(plan);
+      setActiveStep(1);
     } catch (error) {
       alert(error.message);
     } finally {
@@ -437,11 +497,17 @@ export default function App() {
     }
   }
 
+  async function handleSavePlan(event) {
+    event?.preventDefault();
+    await handleContinue();
+  }
+
   function handleResetEdit() {
     setEditingPlanId(null);
     setCurrentPlan(null);
     setIntake(null);
     setFormData(emptyForm);
+    setActiveStep(0);
   }
 
   function handleEditPlan(plan) {
@@ -449,6 +515,7 @@ export default function App() {
     setCurrentPlan(plan);
     setIntake({ eventType: plan.event.type, readiness: "ready-for-research", missingFields: [], followUpQuestions: [], suggestions: plan.event.suggestions || [], assistantMessage: "Loaded existing plan into the editor." });
     setFormData(eventFormFromPlan(plan));
+    setActiveStep(1);
   }
 
   async function handleTogglePause(plan) {
@@ -485,6 +552,11 @@ export default function App() {
     }
   }
 
+  async function handleStartOutreach() {
+    setActiveStep(2);
+    await handleSendInquiries();
+  }
+
   async function handleFinalizeVendor(vendorId) {
     if (!currentPlan) return;
     try {
@@ -496,6 +568,19 @@ export default function App() {
     }
   }
 
+  const steps = [
+    { id: "intake", label: "Idea intake" },
+    { id: "direction", label: "Direction" },
+    { id: "matches", label: "Matches" },
+    { id: "comms", label: "Comms" }
+  ];
+
+  const canAccessStep = (index) => {
+    if (index === 0) return true;
+    if (index === 1) return Boolean(currentPlan);
+    return Boolean(currentPlan);
+  };
+
   return (
     <main className="shell">
       <section className="topbar">
@@ -506,8 +591,90 @@ export default function App() {
         <DashboardSection plans={dashboardPlans} onEdit={handleEditPlan} onPause={handleTogglePause} onDelete={handleDeletePlan} />
         <section className="hero"><SystemStatus integrations={systemStatus} /></section>
       </section>
-      <IntakeSection formData={formData} onChange={handleFieldChange} onAnalyze={handleAnalyze} onContinue={handleContinue} onResetEdit={handleResetEdit} intake={intake} editingPlanId={editingPlanId} currentPlan={currentPlan} analyzing={analyzing} savingPlan={savingPlan} />
-      <ResultsSection plan={currentPlan} onSendInquiries={handleSendInquiries} onFinalizeVendor={handleFinalizeVendor} sendingInquiries={sendingInquiries} />
+      <section className="carousel">
+        <div className="carousel-tabs">
+          {steps.map((step, index) => (
+            <button
+              key={step.id}
+              type="button"
+              className={`tab-button ${activeStep === index ? "active" : ""}`}
+              onClick={() => { if (canAccessStep(index)) setActiveStep(index); }}
+              disabled={!canAccessStep(index)}
+            >
+              <span className="tab-index">{index + 1}</span>
+              {step.label}
+            </button>
+          ))}
+        </div>
+        <div className="carousel-track" style={{ transform: `translateX(-${activeStep * 100}%)` }}>
+          <div className="carousel-slide">
+            <IntakeSection
+              formData={formData}
+              onChange={handleFieldChange}
+              onAnalyze={handleAnalyze}
+              onResetEdit={handleResetEdit}
+              intake={intake}
+              editingPlanId={editingPlanId}
+              currentPlan={currentPlan}
+              analyzing={analyzing}
+              onAdvance={handleContinue}
+              advanceDisabled={savingPlan}
+            />
+          </div>
+          <div className="carousel-slide">
+            {currentPlan ? (
+              <DirectionSection
+                plan={currentPlan}
+                intake={intake}
+                formData={formData}
+                onChange={handleFieldChange}
+                onSave={handleSavePlan}
+                savingPlan={savingPlan}
+                onSendInquiries={handleStartOutreach}
+                sendingInquiries={sendingInquiries}
+              />
+            ) : (
+              <section className="panel">
+                <h2>Create an event plan to continue</h2>
+                <p>Complete the intake details and continue to generate event direction.</p>
+              </section>
+            )}
+          </div>
+          <div className="carousel-slide">
+            {currentPlan ? (
+              <MatchesSection plan={currentPlan} onFinalizeVendor={handleFinalizeVendor} />
+            ) : (
+              <section className="panel">
+                <h2>No recommendations yet</h2>
+                <p>Generate the event plan first to see recommended matches.</p>
+              </section>
+            )}
+          </div>
+          <div className="carousel-slide">
+            {currentPlan ? (
+              <CommunicationSection plan={currentPlan} />
+            ) : (
+              <section className="panel">
+                <h2>No communications yet</h2>
+                <p>Once outreach begins, the communication log will appear here.</p>
+              </section>
+            )}
+          </div>
+        </div>
+        <div className="carousel-nav">
+          <button type="button" className="secondary" onClick={() => setActiveStep((step) => Math.max(0, step - 1))} disabled={activeStep === 0}>
+            Previous
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setActiveStep((step) => Math.min(steps.length - 1, step + 1))}
+            disabled={!canAccessStep(activeStep + 1)}
+          >
+            Next
+          </button>
+        </div>
+      </section>
     </main>
   );
 }
