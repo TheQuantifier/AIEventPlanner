@@ -11,7 +11,7 @@ Minimal split-stack prototype for an autonomous event-planning workflow.
 - API drafts inquiry emails for the top three vendors and exposes them to the web app.
 - User reviews the final shortlist and confirms the selected vendor.
 - API drafts the final confirmation email for the chosen vendor.
-- Plans are persisted to Neon in a JSON-backed `event_plans` table so state survives restarts and deploys.
+- Plans are persisted to Neon in normalized relational tables so state survives restarts and deploys.
 - Dashboard events are now loaded from the API, and pause/delete actions persist server-side.
 
 ## Project layout
@@ -112,7 +112,7 @@ Mailgun notes:
 - Set `APP_BASE_URL` to the API base URL for the current environment
 - For local development, use `APP_BASE_URL=http://localhost:4000`
 - For Render, use your public Render API URL or custom domain, for example `https://api.manuswebworks.org`
-- The app generates a per-plan reply-to address like `plan-abc123@reply.manuswebworks.org`
+- The app generates a per-user reply-to address with a plan suffix like `johnhand+plan-abc123@reply.manuswebworks.org`
 - Important: external providers like Mailgun cannot call back to `localhost`, so inbound webhook setup must use your public Render URL, not a local URL
 
 Render notes:
@@ -135,7 +135,7 @@ Database notes:
 
 - On API startup, the server runs SQL migrations from `api/migrations/`.
 - Applied migrations are tracked in a `schema_migrations` table.
-- Each plan is stored as a full JSON document in Postgres for a simple first persistence layer.
+- Plans, shortlisted vendors, inbound replies, and outbound messages are stored in normalized Postgres tables.
 - `DB_URL` is the primary connection string used by the API.
 
 To create the Mailgun inbound route from `.env`:
@@ -156,11 +156,9 @@ This scaffold still uses:
 
 - Mock vendor catalog data
 - Simple vendor scoring and message threading assumptions
-- JSON document persistence rather than fully normalized relational tables
 
 To turn this into the full product you described, the next integrations are:
 
 1. Real search and comparison APIs for venues, vendors, maps, pricing, and reviews
 2. LLM-based extraction for user requirements and follow-up questions
-3. Normalized database tables for plans, vendors, outbound mail, inbound replies, and decisions
-4. Human approval controls before every outbound email and final booking action
+3. Human approval controls before every outbound email and final booking action

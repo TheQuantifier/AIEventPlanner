@@ -16,7 +16,9 @@ export function isTestingStage() {
 
 export const appConfig = {
   app: {
-    stage: getAppStage()
+    stage: getAppStage(),
+    baseUrl: read("APP_BASE_URL"),
+    webBaseUrl: read("WEB_BASE_URL")
   },
   emailClient: {
     provider: read("EMAIL_CLIENT_PROVIDER"),

@@ -1,6 +1,7 @@
 import http from "node:http";
 import { getConfigStatus } from "./src/config/env.js";
 import { runMigrations } from "./src/migrations.js";
+import { createSessionForCredentials, getUserFromToken, registerUser, requestPasswordReset, resetPassword, revokeSession } from "./src/auth.js";
 import { validateMailgunSignature, validateWebhookToken } from "./src/email-client.js";
 import {
   analyzeIntake,
@@ -22,7 +23,7 @@ function sendJson(response, statusCode, payload) {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type"
+    "Access-Control-Allow-Headers": "Content-Type, Authorization"
   });
   response.end(JSON.stringify(payload, null, 2));
 }
@@ -69,6 +70,12 @@ async function readFormBody(request) {
   return payload;
 }
 
+function extractBearerToken(request) {
+  const header = request.headers.authorization || "";
+  const match = String(header).match(/^Bearer\s+(.+)$/i);
+  return match?.[1] || "";
+}
+
 const server = http.createServer(async (request, response) => {
   if (!request.url) {
     return sendNotFound(response);
@@ -78,7 +85,7 @@ const server = http.createServer(async (request, response) => {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type"
+      "Access-Control-Allow-Headers": "Content-Type, Authorization"
     });
     response.end();
     return;
@@ -88,6 +95,10 @@ const server = http.createServer(async (request, response) => {
   const path = url.pathname;
 
   try {
+    const currentUser = path.startsWith("/api/") && !path.startsWith("/api/auth/") && path !== "/api/webhooks/mailgun/inbound"
+      ? await getUserFromToken(extractBearerToken(request))
+      : null;
+
     if (request.method === "GET" && path === "/health") {
       return sendJson(response, 200, {
         ok: true,
@@ -95,21 +106,65 @@ const server = http.createServer(async (request, response) => {
       });
     }
 
+    if (request.method === "POST" && path === "/api/auth/register") {
+      const payload = await readJsonBody(request);
+      const registration = await registerUser(payload);
+
+      if (registration.error) {
+        return sendJson(response, 400, registration);
+      }
+
+      const session = await createSessionForCredentials(payload);
+      return sendJson(response, 201, session);
+    }
+
+    if (request.method === "POST" && path === "/api/auth/login") {
+      const payload = await readJsonBody(request);
+      const session = await createSessionForCredentials(payload);
+      return sendJson(response, session.error ? 401 : 200, session);
+    }
+
+    if (request.method === "GET" && path === "/api/auth/me") {
+      const user = await getUserFromToken(extractBearerToken(request));
+      return sendJson(response, user ? 200 : 401, user ? { user } : { error: "Unauthorized" });
+    }
+
+    if (request.method === "POST" && path === "/api/auth/logout") {
+      await revokeSession(extractBearerToken(request));
+      return sendJson(response, 200, { ok: true });
+    }
+
+    if (request.method === "POST" && path === "/api/auth/forgot-password") {
+      const payload = await readJsonBody(request);
+      const result = await requestPasswordReset(payload);
+      return sendJson(response, result.error ? 400 : 200, result.error ? result : { ok: true });
+    }
+
+    if (request.method === "POST" && path === "/api/auth/reset-password") {
+      const payload = await readJsonBody(request);
+      const result = await resetPassword(payload);
+      return sendJson(response, result.error ? 400 : 200, result);
+    }
+
+    if (path.startsWith("/api/") && !path.startsWith("/api/auth/") && path !== "/api/webhooks/mailgun/inbound" && !currentUser) {
+      return sendJson(response, 401, { error: "Unauthorized" });
+    }
+
     if (request.method === "GET" && path === "/api/plans") {
-      const plans = await listAllPlans();
+      const plans = await listAllPlans(currentUser.id);
       return sendJson(response, 200, { items: plans });
     }
 
     if (request.method === "POST" && path === "/api/plans") {
       const payload = await readJsonBody(request);
-      const plan = await createPlan(payload);
+      const plan = await createPlan(payload, currentUser);
       return sendJson(response, 201, plan);
     }
 
     if (request.method === "PUT" && path.startsWith("/api/plans/")) {
       const planId = path.replace("/api/plans/", "");
       const payload = await readJsonBody(request);
-      const plan = await updatePlan(planId, payload);
+      const plan = await updatePlan(planId, payload, currentUser);
 
       if (!plan) {
         return sendJson(response, 404, { error: "Plan not found" });
@@ -126,7 +181,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && path.startsWith("/api/plans/")) {
       const planId = path.replace("/api/plans/", "");
-      const plan = await getPlan(planId);
+      const plan = await getPlan(planId, currentUser.id);
 
       if (!plan) {
         return sendJson(response, 404, { error: "Plan not found" });
@@ -138,7 +193,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "PATCH" && path.endsWith("/pause")) {
       const [, , , planId] = path.split("/");
       const payload = await readJsonBody(request);
-      const plan = await setPlanPaused(planId, payload.paused);
+      const plan = await setPlanPaused(planId, payload.paused, currentUser.id);
 
       if (!plan) {
         return sendJson(response, 404, { error: "Plan not found" });
@@ -149,7 +204,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && path.endsWith("/send-inquiries")) {
       const [, , , planId] = path.split("/");
-      const result = await sendPlanInquiries(planId);
+      const result = await sendPlanInquiries(planId, currentUser.id);
 
       if (!result) {
         return sendJson(response, 404, { error: "Plan not found" });
@@ -165,7 +220,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && path.endsWith("/finalize")) {
       const [, , , planId] = path.split("/");
       const payload = await readJsonBody(request);
-      const result = await finalizeVendorSelection(planId, payload.vendorId);
+      const result = await finalizeVendorSelection(planId, payload.vendorId, currentUser.id);
 
       if (!result) {
         return sendJson(response, 404, { error: "Plan not found" });
@@ -180,7 +235,7 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "DELETE" && path.startsWith("/api/plans/")) {
       const planId = path.replace("/api/plans/", "");
-      const removed = await removePlan(planId);
+      const removed = await removePlan(planId, currentUser.id);
 
       if (!removed) {
         return sendJson(response, 404, { error: "Plan not found" });

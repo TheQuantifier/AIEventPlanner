@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const apiBaseUrl = __API_BASE_URL__;
+const authStorageKey = "aieventplanner.authToken";
 
 const emptyForm = {
   brief: "",
@@ -9,6 +10,14 @@ const emptyForm = {
   dates: "",
   theme: "",
   guestCount: ""
+};
+
+const emptyAuthForm = {
+  identifier: "",
+  email: "",
+  fullName: "",
+  password: "",
+  token: ""
 };
 
 function currency(value) {
@@ -508,6 +517,13 @@ function CommunicationSection({ plan }) {
 }
 
 export default function App() {
+  const [sessionToken, setSessionToken] = useState("");
+  const [user, setUser] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [authForm, setAuthForm] = useState(emptyAuthForm);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
   const [dashboardPlans, setDashboardPlans] = useState([]);
   const [formData, setFormData] = useState(emptyForm);
   const [intake, setIntake] = useState(null);
@@ -521,10 +537,29 @@ export default function App() {
   const [isPageTransitioning, setIsPageTransitioning] = useState(false);
 
   useEffect(() => {
-    loadDashboardPlans();
+    const resetToken = new URLSearchParams(window.location.search).get("resetToken");
+
+    const storedToken = window.localStorage.getItem(authStorageKey) || "";
+
+    if (resetToken) {
+      setAuthMode("reset");
+      setAuthForm((current) => ({ ...current, token: resetToken }));
+    }
+
+    if (!storedToken) {
+      setAuthLoading(false);
+      return;
+    }
+
+    setSessionToken(storedToken);
+    loadCurrentUser(storedToken).finally(() => setAuthLoading(false));
   }, []);
 
   useEffect(() => {
+    if (!user) {
+      return undefined;
+    }
+
     const intervalId = window.setInterval(() => {
       if (currentPlan?.id) {
         loadPlan(currentPlan.id);
@@ -537,11 +572,37 @@ export default function App() {
     }, 15000);
 
     return () => window.clearInterval(intervalId);
-  }, [currentPlan?.id, currentPage]);
+  }, [currentPlan?.id, currentPage, user]);
+
+  useEffect(() => {
+    if (user) {
+      loadDashboardPlans();
+    }
+  }, [user]);
+
+  function authHeaders(extra = {}) {
+    return {
+      ...extra,
+      ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {})
+    };
+  }
+
+  async function loadCurrentUser(token = sessionToken) {
+    try {
+      const payload = await requestJson(`${apiBaseUrl}/api/auth/me`, { headers: token ? { Authorization: `Bearer ${token}` } : {} }, "Failed to load account");
+      setUser(payload.user);
+      return payload.user;
+    } catch {
+      window.localStorage.removeItem(authStorageKey);
+      setSessionToken("");
+      setUser(null);
+      return null;
+    }
+  }
 
   async function loadDashboardPlans() {
     try {
-      const payload = await requestJson(`${apiBaseUrl}/api/plans`, {}, "Failed to load events");
+      const payload = await requestJson(`${apiBaseUrl}/api/plans`, { headers: authHeaders() }, "Failed to load events");
       setDashboardPlans(sortPlans(Array.isArray(payload.items) ? payload.items : []));
     } catch (error) {
       alert(error.message);
@@ -550,7 +611,7 @@ export default function App() {
 
   async function loadPlan(planId) {
     try {
-      const plan = await requestJson(`${apiBaseUrl}/api/plans/${planId}`, {}, "Failed to load event");
+      const plan = await requestJson(`${apiBaseUrl}/api/plans/${planId}`, { headers: authHeaders() }, "Failed to load event");
       setCurrentPlan((current) => (current?.id === plan.id ? plan : current));
       upsertPlan(plan);
     } catch (error) {
@@ -573,11 +634,108 @@ export default function App() {
     setFormData((current) => ({ ...current, [name]: value }));
   }
 
+  function handleAuthFieldChange(event) {
+    const { name, value } = event.target;
+    setAuthForm((current) => ({ ...current, [name]: value }));
+    setAuthMessage("");
+  }
+
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthMessage("");
+
+    try {
+      if (authMode === "forgot") {
+        await requestJson(
+          `${apiBaseUrl}/api/auth/forgot-password`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: authForm.email })
+          },
+          "Failed to start password reset"
+        );
+        setAuthMessage("If that email exists, a reset message has been sent.");
+        return;
+      }
+
+      if (authMode === "reset") {
+        await requestJson(
+          `${apiBaseUrl}/api/auth/reset-password`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: authForm.token, password: authForm.password })
+          },
+          "Failed to reset password"
+        );
+        setAuthMode("login");
+        setAuthForm(emptyAuthForm);
+        setAuthMessage("Password updated. Sign in with your new password.");
+        if (window.location.search.includes("resetToken")) {
+          window.history.replaceState({}, "", window.location.pathname);
+        }
+        return;
+      }
+
+      const payload = await requestJson(
+        `${apiBaseUrl}/api/auth/${authMode === "login" ? "login" : "register"}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            authMode === "login"
+              ? { identifier: authForm.identifier, password: authForm.password }
+              : { email: authForm.email, fullName: authForm.fullName, password: authForm.password }
+          )
+        },
+        authMode === "login" ? "Failed to sign in" : "Failed to create account"
+      );
+
+      window.localStorage.setItem(authStorageKey, payload.token);
+      setSessionToken(payload.token);
+      setUser(payload.user);
+      setAuthForm(emptyAuthForm);
+      setDashboardPlans([]);
+      setCurrentPlan(null);
+      setEditingPlanId(null);
+      setCurrentPage("home");
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      if (sessionToken) {
+        await requestJson(`${apiBaseUrl}/api/auth/logout`, { method: "POST", headers: authHeaders() }, "Failed to sign out");
+      }
+    } catch (error) {
+      console.error(error);
+    } finally {
+      window.localStorage.removeItem(authStorageKey);
+      setSessionToken("");
+      setUser(null);
+      setDashboardPlans([]);
+      setCurrentPlan(null);
+      setEditingPlanId(null);
+      setIntake(null);
+      setFormData(emptyForm);
+      setAuthForm(emptyAuthForm);
+      setAuthMessage("");
+      setCurrentPage("home");
+      setActiveStep(0);
+    }
+  }
+
   async function handleAnalyze(event, nextPage = currentPage) {
     event.preventDefault();
     setAnalyzing(true);
     try {
-      const nextIntake = await requestJson(`${apiBaseUrl}/api/intake`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formData) }, "The API could not analyze the event.");
+      const nextIntake = await requestJson(`${apiBaseUrl}/api/intake`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(formData) }, "The API could not analyze the event.");
       setIntake(nextIntake);
       if (!editingPlanId) {
         setCurrentPlan(null);
@@ -603,7 +761,7 @@ export default function App() {
   async function handleContinue() {
     setSavingPlan(true);
     try {
-      const plan = await requestJson(`${apiBaseUrl}/api/plans${editingPlanId ? `/${editingPlanId}` : ""}`, { method: editingPlanId ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formData) }, "The API could not generate a plan.");
+      const plan = await requestJson(`${apiBaseUrl}/api/plans${editingPlanId ? `/${editingPlanId}` : ""}`, { method: editingPlanId ? "PUT" : "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(formData) }, "The API could not generate a plan.");
       setCurrentPlan(plan);
       setEditingPlanId(plan.id);
       upsertPlan(plan);
@@ -641,7 +799,7 @@ export default function App() {
 
   async function handleTogglePause(plan) {
     try {
-      const updatedPlan = await requestJson(`${apiBaseUrl}/api/plans/${plan.id}/pause`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paused: !plan.isPaused }) }, "Failed to update pause state");
+      const updatedPlan = await requestJson(`${apiBaseUrl}/api/plans/${plan.id}/pause`, { method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ paused: !plan.isPaused }) }, "Failed to update pause state");
       upsertPlan(updatedPlan);
       if (currentPlan?.id === updatedPlan.id) setCurrentPlan(updatedPlan);
     } catch (error) {
@@ -651,7 +809,7 @@ export default function App() {
 
   async function handleDeletePlan(plan) {
     try {
-      await requestJson(`${apiBaseUrl}/api/plans/${plan.id}`, { method: "DELETE" }, "Failed to delete event");
+      await requestJson(`${apiBaseUrl}/api/plans/${plan.id}`, { method: "DELETE", headers: authHeaders() }, "Failed to delete event");
       setDashboardPlans((current) => current.filter((item) => item.id !== plan.id));
       if (currentPlan?.id === plan.id) handleResetEdit();
     } catch (error) {
@@ -663,7 +821,7 @@ export default function App() {
     if (!currentPlan) return;
     setSendingInquiries(true);
     try {
-      const updatedPlan = await requestJson(`${apiBaseUrl}/api/plans/${currentPlan.id}/send-inquiries`, { method: "POST", headers: { "Content-Type": "application/json" } }, "Failed to send inquiry emails");
+      const updatedPlan = await requestJson(`${apiBaseUrl}/api/plans/${currentPlan.id}/send-inquiries`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }) }, "Failed to send inquiry emails");
       setCurrentPlan(updatedPlan);
       upsertPlan(updatedPlan);
     } catch (error) {
@@ -689,7 +847,7 @@ export default function App() {
   async function handleFinalizeVendor(vendorId) {
     if (!currentPlan) return;
     try {
-      const updatedPlan = await requestJson(`${apiBaseUrl}/api/plans/${currentPlan.id}/finalize`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vendorId }) }, "Failed to finalize vendor");
+      const updatedPlan = await requestJson(`${apiBaseUrl}/api/plans/${currentPlan.id}/finalize`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ vendorId }) }, "Failed to finalize vendor");
       setCurrentPlan(updatedPlan);
       upsertPlan(updatedPlan);
     } catch (error) {
@@ -710,6 +868,40 @@ export default function App() {
     return Boolean(currentPlan);
   };
 
+  if (authLoading) {
+    return (
+      <main className="shell">
+        <section className="panel auth-panel">
+          <h2>Loading account</h2>
+          <p className="fine-print">Checking your saved session.</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <main className="shell">
+        <section className="topbar">
+          <div>
+            <p className="eyebrow">AI Event Planner</p>
+            <h1>Account access</h1>
+          </div>
+          <div className="topbar-badge">Sign in to manage event plans and inbound replies</div>
+        </section>
+        <AuthSection
+          mode={authMode}
+          formData={authForm}
+          busy={authBusy}
+          message={authMessage}
+          onChange={handleAuthFieldChange}
+          onSubmit={handleAuthSubmit}
+          onSwitch={setAuthMode}
+        />
+      </main>
+    );
+  }
+
   return (
     <main className="shell">
       <section className="topbar">
@@ -723,6 +915,10 @@ export default function App() {
               Back to dashboard
             </button>
           ) : null}
+          <div className="topbar-badge">Signed in as {user.username}</div>
+          <button type="button" className="secondary" onClick={handleLogout}>
+            Sign out
+          </button>
           <div className="topbar-badge">Workflow orchestration for live event plans</div>
         </div>
       </section>
@@ -831,5 +1027,100 @@ export default function App() {
         </section>
       )}
     </main>
+  );
+}
+
+function AuthSection({ mode, formData, busy, message, onChange, onSubmit, onSwitch }) {
+  const isLogin = mode === "login";
+  const isRegister = mode === "register";
+  const isForgot = mode === "forgot";
+  const isReset = mode === "reset";
+
+  return (
+    <section className="auth-shell">
+      <div className="panel auth-panel">
+        <p className="section-kicker">Account</p>
+        <h2>{isLogin ? "Sign in" : isRegister ? "Create account" : isForgot ? "Reset password" : "Choose a new password"}</h2>
+        <p className="fine-print">
+          {isLogin
+            ? "Sign in with your email or username to access your event plans and replies."
+            : isRegister
+              ? "Register with your full name and email. The app will generate a unique username for your reply mailbox."
+              : isForgot
+                ? "Enter your email address and we will send a reset message."
+                : "Paste the reset token from your email and choose a strong new password."}
+        </p>
+        {message ? <p className="fine-print">{message}</p> : null}
+        <form className="planner-form" onSubmit={onSubmit}>
+          {isLogin ? (
+            <label className="field">
+              <span>Email or username</span>
+              <input name="identifier" value={formData.identifier} onChange={onChange} placeholder="you@example.com" autoComplete="username" />
+            </label>
+          ) : null}
+          {isRegister ? (
+            <>
+              <label className="field">
+                <span>Full name</span>
+                <input name="fullName" value={formData.fullName} onChange={onChange} placeholder="John Hand" autoComplete="name" />
+              </label>
+              <label className="field">
+                <span>Email</span>
+                <input name="email" value={formData.email} onChange={onChange} placeholder="you@example.com" autoComplete="email" />
+              </label>
+            </>
+          ) : null}
+          {isForgot ? (
+            <label className="field">
+              <span>Email</span>
+              <input name="email" value={formData.email} onChange={onChange} placeholder="you@example.com" autoComplete="email" />
+            </label>
+          ) : null}
+          {isReset ? (
+            <label className="field">
+              <span>Reset token</span>
+              <input name="token" value={formData.token} onChange={onChange} placeholder="Paste the token from the email" autoComplete="one-time-code" />
+            </label>
+          ) : null}
+          {!isForgot ? (
+            <label className="field">
+              <span>Password</span>
+              <input
+                name="password"
+                type="password"
+                value={formData.password}
+                onChange={onChange}
+                placeholder="12+ chars, upper, lower, number, symbol"
+                autoComplete={isLogin ? "current-password" : "new-password"}
+              />
+            </label>
+          ) : null}
+          <div className="action-row">
+            <button
+              type="submit"
+              disabled={
+                busy ||
+                (isLogin && (!formData.identifier.trim() || !formData.password)) ||
+                (isRegister && (!formData.fullName.trim() || !formData.email.trim() || !formData.password)) ||
+                (isForgot && !formData.email.trim()) ||
+                (isReset && (!formData.token.trim() || !formData.password))
+              }
+            >
+              {busy ? "Working..." : isLogin ? "Sign in" : isRegister ? "Create account" : isForgot ? "Send reset email" : "Update password"}
+            </button>
+            {!isReset ? (
+              <button type="button" className="secondary" disabled={busy} onClick={() => onSwitch(isLogin ? "register" : "login")}>
+                {isLogin ? "Need an account?" : "Back to sign in"}
+              </button>
+            ) : null}
+            {isLogin ? (
+              <button type="button" className="secondary" disabled={busy} onClick={() => onSwitch("forgot")}>
+                Forgot password
+              </button>
+            ) : null}
+          </div>
+        </form>
+      </div>
+    </section>
   );
 }

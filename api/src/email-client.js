@@ -58,6 +58,17 @@ export function buildPlanReplyAddress(planId) {
   return `${planId}@${inboundDomain}`;
 }
 
+export function buildUserReplyAddress({ username, planId }) {
+  const inboundDomain = trim(appConfig.emailClient.inboundDomain);
+
+  if (!inboundDomain) {
+    return trim(appConfig.emailClient.replyTo) || "";
+  }
+
+  const mailbox = [trim(username).toLowerCase(), trim(planId)].filter(Boolean).join("+");
+  return `${mailbox}@${inboundDomain}`;
+}
+
 export async function sendEmail({ to, subject, text, html, replyTo, tags = [] }) {
   if (!isEmailClientConfigured()) {
     return {

@@ -1,6 +1,6 @@
 import { vendorCatalog } from "./data/vendors.js";
 import { buildConfirmationEmail, buildInquiryEmail } from "./email.js";
-import { buildPlanReplyAddress, isTestModeEnabled, resolveAppInbox, sendEmail } from "./email-client.js";
+import { buildPlanReplyAddress, buildUserReplyAddress, isTestModeEnabled, resolveAppInbox, sendEmail } from "./email-client.js";
 import { generateIntakeWithAi, generatePlanWithAi, isAiConfigured } from "./ai-planner.js";
 import { deletePlan, isDbConfigured, listPlans, loadPlan, savePlan } from "./db.js";
 
@@ -17,6 +17,18 @@ function normalizeText(value) {
 
 function normalizeEmail(value) {
   return normalizeText(value).toLowerCase();
+}
+
+function buildOwnerSummary(user) {
+  return user
+    ? {
+        userId: user.id,
+        username: user.username
+      }
+    : {
+        userId: null,
+        username: ""
+      };
 }
 
 function toTitleCase(value) {
@@ -84,18 +96,20 @@ async function persistPlan(plan) {
   return normalizedPlan;
 }
 
-async function getStoredPlan(planId) {
+async function getStoredPlan(planId, userId = null) {
   if (plans.has(planId)) {
     const cachedPlan = refreshPlanDrafts(plans.get(planId));
-    plans.set(planId, cachedPlan);
-    return cachedPlan;
+    if (!userId || cachedPlan?.owner?.userId === userId) {
+      plans.set(planId, cachedPlan);
+      return cachedPlan;
+    }
   }
 
   if (!isDbConfigured()) {
     return null;
   }
 
-  const plan = await loadPlan(planId);
+  const plan = await loadPlan(planId, userId);
   if (plan) {
     const normalizedPlan = refreshPlanDrafts(plan);
     plans.set(planId, normalizedPlan);
@@ -105,16 +119,16 @@ async function getStoredPlan(planId) {
   return plan;
 }
 
-async function listStoredPlans() {
+async function listStoredPlans(userId) {
   if (isDbConfigured()) {
-    const storedPlans = (await listPlans()).map((plan) => refreshPlanDrafts(plan));
+    const storedPlans = (await listPlans(userId)).map((plan) => refreshPlanDrafts(plan));
     storedPlans.forEach((plan) => {
       plans.set(plan.id, plan);
     });
     return storedPlans;
   }
 
-  return [...plans.values()].map((plan) => refreshPlanDrafts(plan)).sort((left, right) => {
+  return [...plans.values()].filter((plan) => plan?.owner?.userId === userId).map((plan) => refreshPlanDrafts(plan)).sort((left, right) => {
     const leftTime = new Date(left.createdAt || 0).getTime();
     const rightTime = new Date(right.createdAt || 0).getTime();
     return rightTime - leftTime;
@@ -460,9 +474,9 @@ export async function analyzeIntake(payload) {
   }
 }
 
-async function buildPlanDocument(payload, existingPlan = null) {
+async function buildPlanDocument(payload, user, existingPlan = null) {
   const planId = existingPlan?.id || createId("plan");
-  const replyTo = existingPlan?.communication?.replyTo || buildPlanReplyAddress(planId);
+  const replyTo = existingPlan?.communication?.replyTo || buildUserReplyAddress({ username: user?.username, planId }) || buildPlanReplyAddress(planId);
   let event;
   let shortlist;
 
@@ -501,6 +515,7 @@ async function buildPlanDocument(payload, existingPlan = null) {
     updatedAt: new Date().toISOString(),
     workflowState: "awaiting-user-selection",
     isPaused: Boolean(existingPlan?.isPaused),
+    owner: buildOwnerSummary(user),
     event,
     communication,
     automation: {
@@ -513,29 +528,29 @@ async function buildPlanDocument(payload, existingPlan = null) {
   };
 }
 
-export async function createPlan(payload) {
-  const plan = await buildPlanDocument(payload);
+export async function createPlan(payload, user) {
+  const plan = await buildPlanDocument(payload, user);
 
   return persistPlan(plan);
 }
 
-export async function updatePlan(planId, payload) {
-  const existingPlan = await getStoredPlan(planId);
+export async function updatePlan(planId, payload, user) {
+  const existingPlan = await getStoredPlan(planId, user.id);
 
   if (!existingPlan) {
     return null;
   }
 
-  const plan = await buildPlanDocument(payload, existingPlan);
+  const plan = await buildPlanDocument(payload, user, existingPlan);
   return persistPlan(plan);
 }
 
-export async function listAllPlans() {
-  return listStoredPlans();
+export async function listAllPlans(userId) {
+  return listStoredPlans(userId);
 }
 
-export async function getPlan(planId) {
-  return getStoredPlan(planId);
+export async function getPlan(planId, userId) {
+  return getStoredPlan(planId, userId);
 }
 
 async function deliverEmail(message) {
@@ -550,8 +565,8 @@ async function deliverEmail(message) {
   }
 }
 
-export async function sendPlanInquiries(planId) {
-  const plan = await getStoredPlan(planId);
+export async function sendPlanInquiries(planId, userId) {
+  const plan = await getStoredPlan(planId, userId);
 
   if (!plan) {
     return null;
@@ -671,7 +686,8 @@ export async function recordInboundReply(payload) {
     };
   }
 
-  const [planId] = planAddress.split("@");
+  const localPart = planAddress.split("@")[0] || "";
+  const planId = localPart.includes("+") ? localPart.split("+").pop() : localPart;
   const plan = await getStoredPlan(planId);
 
   if (!plan) {
@@ -729,8 +745,8 @@ export async function recordInboundReply(payload) {
   };
 }
 
-export async function finalizeVendorSelection(planId, vendorId) {
-  const plan = await getStoredPlan(planId);
+export async function finalizeVendorSelection(planId, vendorId, userId) {
+  const plan = await getStoredPlan(planId, userId);
 
   if (!plan) {
     return null;
@@ -797,8 +813,8 @@ export async function finalizeVendorSelection(planId, vendorId) {
   return persistPlan(updatedPlan);
 }
 
-export async function setPlanPaused(planId, paused) {
-  const plan = await getStoredPlan(planId);
+export async function setPlanPaused(planId, paused, userId) {
+  const plan = await getStoredPlan(planId, userId);
 
   if (!plan) {
     return null;
@@ -813,8 +829,8 @@ export async function setPlanPaused(planId, paused) {
   return persistPlan(updatedPlan);
 }
 
-export async function removePlan(planId) {
-  const plan = await getStoredPlan(planId);
+export async function removePlan(planId, userId) {
+  const plan = await getStoredPlan(planId, userId);
 
   if (!plan) {
     return false;
@@ -823,7 +839,7 @@ export async function removePlan(planId) {
   plans.delete(planId);
 
   if (isDbConfigured()) {
-    await deletePlan(planId);
+    await deletePlan(planId, userId);
   }
 
   return true;
