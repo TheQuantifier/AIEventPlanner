@@ -524,12 +524,37 @@ export default function App() {
     loadDashboardPlans();
   }, []);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      if (currentPlan?.id) {
+        loadPlan(currentPlan.id);
+        return;
+      }
+
+      if (currentPage === "home") {
+        loadDashboardPlans();
+      }
+    }, 15000);
+
+    return () => window.clearInterval(intervalId);
+  }, [currentPlan?.id, currentPage]);
+
   async function loadDashboardPlans() {
     try {
       const payload = await requestJson(`${apiBaseUrl}/api/plans`, {}, "Failed to load events");
       setDashboardPlans(sortPlans(Array.isArray(payload.items) ? payload.items : []));
     } catch (error) {
       alert(error.message);
+    }
+  }
+
+  async function loadPlan(planId) {
+    try {
+      const plan = await requestJson(`${apiBaseUrl}/api/plans/${planId}`, {}, "Failed to load event");
+      setCurrentPlan((current) => (current?.id === plan.id ? plan : current));
+      upsertPlan(plan);
+    } catch (error) {
+      console.error(error);
     }
   }
 

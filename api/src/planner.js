@@ -15,6 +15,10 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function normalizeEmail(value) {
+  return normalizeText(value).toLowerCase();
+}
+
 function toTitleCase(value) {
   return normalizeText(value)
     .split(/[\s-]+/)
@@ -386,6 +390,64 @@ function normalizeShortlist(shortlist, event, replyTo) {
   });
 }
 
+function preserveShortlistState(shortlist, existingShortlist = []) {
+  const existingByEmail = new Map();
+
+  existingShortlist.forEach((vendor) => {
+    const keys = [
+      normalizeEmail(vendor.intendedEmail),
+      normalizeEmail(vendor.email),
+      normalizeEmail(vendor.inquiryEmail?.to)
+    ].filter(Boolean);
+
+    keys.forEach((key) => {
+      if (!existingByEmail.has(key)) {
+        existingByEmail.set(key, vendor);
+      }
+    });
+  });
+
+  return shortlist.map((vendor) => {
+    const preserved = [
+      normalizeEmail(vendor.intendedEmail),
+      normalizeEmail(vendor.email),
+      normalizeEmail(vendor.inquiryEmail?.to)
+    ]
+      .filter(Boolean)
+      .map((key) => existingByEmail.get(key))
+      .find(Boolean);
+
+    if (!preserved) {
+      return vendor;
+    }
+
+    return {
+      ...vendor,
+      id: preserved.id || vendor.id,
+      status: preserved.status || vendor.status
+    };
+  });
+}
+
+function parseHeaderEntries(payload) {
+  const rawHeaders = payload["message-headers"] || payload["Message-Headers"] || payload.headers;
+
+  if (Array.isArray(rawHeaders)) {
+    return rawHeaders;
+  }
+
+  if (typeof rawHeaders === "string") {
+    try {
+      const parsed = JSON.parse(rawHeaders);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+}
+
 export async function analyzeIntake(payload) {
   if (!isAiConfigured()) {
     return buildFallbackIntake(payload);
@@ -426,6 +488,13 @@ async function buildPlanDocument(payload, existingPlan = null) {
     shortlist = buildShortlistFromCatalog(event, replyTo);
   }
 
+  const communication = {
+    replyTo,
+    outboundMessages: existingPlan?.communication?.outboundMessages || [],
+    inboundMessages: existingPlan?.communication?.inboundMessages || []
+  };
+  const preservedShortlist = preserveShortlistState(shortlist, existingPlan?.shortlist || []);
+
   return {
     id: planId,
     createdAt: existingPlan?.createdAt || new Date().toISOString(),
@@ -433,17 +502,13 @@ async function buildPlanDocument(payload, existingPlan = null) {
     workflowState: "awaiting-user-selection",
     isPaused: Boolean(existingPlan?.isPaused),
     event,
-    communication: {
-      replyTo,
-      outboundMessages: [],
-      inboundMessages: []
-    },
+    communication,
     automation: {
-      inquiryEmailsDrafted: shortlist.length,
-      inquiryEmailsSent: 0,
-      vendorRepliesReceived: 0
+      inquiryEmailsDrafted: preservedShortlist.length,
+      inquiryEmailsSent: communication.outboundMessages.filter((message) => message.type === "inquiry" && message.delivery?.ok).length,
+      vendorRepliesReceived: communication.inboundMessages.length
     },
-    shortlist,
+    shortlist: preservedShortlist,
     finalSelection: null
   };
 }
@@ -559,6 +624,7 @@ function extractEmailAddress(value) {
 
 function extractPlanAddress(payload) {
   const candidates = [];
+  const headerEntries = parseHeaderEntries(payload);
 
   if (Array.isArray(payload.to)) {
     candidates.push(...payload.to);
@@ -578,6 +644,19 @@ function extractPlanAddress(payload) {
     candidates.push(payload.headers["x-envelope-to"]);
     candidates.push(payload.headers["delivered-to"]);
   }
+
+  headerEntries.forEach((entry) => {
+    if (!Array.isArray(entry) || entry.length < 2) {
+      return;
+    }
+
+    const [name, value] = entry;
+    const normalizedName = normalizeText(name).toLowerCase();
+
+    if (["to", "delivered-to", "x-envelope-to", "x-original-to", "envelope-to"].includes(normalizedName)) {
+      candidates.push(value);
+    }
+  });
 
   return candidates.map(extractEmailAddress).find(Boolean) || "";
 }
@@ -605,7 +684,9 @@ export async function recordInboundReply(payload) {
   const fromEmail = extractEmailAddress(
     payload.from || payload.sender?.email || payload.sender || payload.From || payload["body-from"] || ""
   );
-  const vendor = plan.shortlist.find((item) => item.inquiryEmail.to.toLowerCase() === fromEmail.toLowerCase());
+  const vendor = plan.shortlist.find((item) =>
+    [item.intendedEmail, item.email, item.inquiryEmail?.to].some((candidate) => normalizeEmail(candidate) === normalizeEmail(fromEmail))
+  );
 
   const inboundMessage = {
     id: createId("inbound"),
