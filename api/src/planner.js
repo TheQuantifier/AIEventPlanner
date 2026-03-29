@@ -70,18 +70,21 @@ function generateEventTitle({ type, theme, location }) {
 }
 
 async function persistPlan(plan) {
-  plans.set(plan.id, plan);
+  const normalizedPlan = refreshPlanDrafts(plan);
+  plans.set(normalizedPlan.id, normalizedPlan);
 
   if (isDbConfigured()) {
-    await savePlan(plan);
+    await savePlan(normalizedPlan);
   }
 
-  return plan;
+  return normalizedPlan;
 }
 
 async function getStoredPlan(planId) {
   if (plans.has(planId)) {
-    return plans.get(planId);
+    const cachedPlan = refreshPlanDrafts(plans.get(planId));
+    plans.set(planId, cachedPlan);
+    return cachedPlan;
   }
 
   if (!isDbConfigured()) {
@@ -90,7 +93,9 @@ async function getStoredPlan(planId) {
 
   const plan = await loadPlan(planId);
   if (plan) {
-    plans.set(planId, plan);
+    const normalizedPlan = refreshPlanDrafts(plan);
+    plans.set(planId, normalizedPlan);
+    return normalizedPlan;
   }
 
   return plan;
@@ -98,18 +103,51 @@ async function getStoredPlan(planId) {
 
 async function listStoredPlans() {
   if (isDbConfigured()) {
-    const storedPlans = await listPlans();
+    const storedPlans = (await listPlans()).map((plan) => refreshPlanDrafts(plan));
     storedPlans.forEach((plan) => {
       plans.set(plan.id, plan);
     });
     return storedPlans;
   }
 
-  return [...plans.values()].sort((left, right) => {
+  return [...plans.values()].map((plan) => refreshPlanDrafts(plan)).sort((left, right) => {
     const leftTime = new Date(left.createdAt || 0).getTime();
     const rightTime = new Date(right.createdAt || 0).getTime();
     return rightTime - leftTime;
   });
+}
+
+function refreshPlanDrafts(plan) {
+  if (!plan?.event || !Array.isArray(plan.shortlist)) {
+    return plan;
+  }
+
+  const replyTo = plan.communication?.replyTo || "";
+
+  return {
+    ...plan,
+    shortlist: plan.shortlist.map((vendor) => ({
+      ...vendor,
+      inquiryEmail: buildInquiryEmail({
+        event: plan.event,
+        vendor,
+        replyTo
+      })
+    })),
+    finalSelection: plan.finalSelection
+      ? {
+          ...plan.finalSelection,
+          confirmationEmail: buildConfirmationEmail({
+            event: plan.event,
+            vendor: {
+              name: plan.finalSelection.vendorName,
+              email: plan.finalSelection.confirmationEmail?.to || ""
+            },
+            replyTo
+          })
+        }
+      : plan.finalSelection
+  };
 }
 
 function inferEventType(brief) {
@@ -474,7 +512,8 @@ export async function sendPlanInquiries(planId) {
     const delivery = await deliverEmail({
       to: vendor.inquiryEmail.to,
       subject: vendor.inquiryEmail.subject,
-      text: vendor.inquiryEmail.body,
+      text: vendor.inquiryEmail.text || vendor.inquiryEmail.body,
+      html: vendor.inquiryEmail.html,
       replyTo: vendor.inquiryEmail.replyTo,
       tags: ["event-inquiry", plan.id, vendor.id]
     });
@@ -639,7 +678,8 @@ export async function finalizeVendorSelection(planId, vendorId) {
   const delivery = await deliverEmail({
     to: confirmationEmail.to,
     subject: confirmationEmail.subject,
-    text: confirmationEmail.body,
+    text: confirmationEmail.text || confirmationEmail.body,
+    html: confirmationEmail.html,
     replyTo: confirmationEmail.replyTo,
     tags: ["event-confirmation", plan.id, selectedVendor.id]
   });

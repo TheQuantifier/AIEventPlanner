@@ -153,6 +153,59 @@ function buildPlanSummary(plan) {
   ];
 }
 
+function formatThemeLine(event) {
+  return event?.theme ? `Style / theme: ${event.theme}` : "";
+}
+
+function formatEventLabel(event) {
+  return event?.title || event?.type || "event";
+}
+
+function joinEmailLines(lines) {
+  return lines.filter((line) => line !== undefined && line !== null).join("\n");
+}
+
+function buildInquiryPreview(event, vendor, replyTo) {
+  const eventLabel = formatEventLabel(event);
+
+  return {
+    to: vendor.email,
+    subject: `Availability request: ${eventLabel}`,
+    body: joinEmailLines([
+      `Hello ${vendor.name},`,
+      "",
+      "",
+      `I'm reaching out regarding a potential ${eventLabel}. We would love to learn whether your team is a fit for this event.`,
+      "",
+      "",
+      "Event details:",
+      `Event: ${eventLabel}`,
+      `Location: ${event.location}`,
+      `Dates: ${event.dateWindow}`,
+      `Guest count: ${event.guestCount}`,
+      `Budget target: ${event.budgetLabel}`,
+      formatThemeLine(event),
+      "",
+      "",
+      "If available, please share:",
+      "1. Your availability for the requested date range",
+      "2. Relevant package or service options",
+      "3. Estimated pricing or starting range",
+      "4. Any requirements, constraints, or next steps we should know about",
+      "",
+      "",
+      "A short reply is fine. We are mainly trying to confirm fit, availability, and budget alignment.",
+      "",
+      "",
+      replyTo ? `You can reply directly to: ${replyTo}` : "",
+      "",
+      "",
+      "Best,",
+      "AI Event Planner"
+    ])
+  };
+}
+
 function DashboardSection({ plans, onEdit, onPause, onDelete }) {
   const needsActionCount = plans.filter((plan) => getActionStatus(plan).label === "Action needed").length;
   const pausedCount = plans.filter((plan) => plan.isPaused).length;
@@ -281,7 +334,7 @@ function SharedComposer({
             </button>
           ) : null}
           {mode === "home" ? (
-            <span className="composer-hint">The workspace opens after intake analysis.</span>
+            <span className="composer-hint">The workspace opens after initial input.</span>
           ) : null}
           {mode === "workspace" ? (
             <span className="composer-hint">Update the brief here and keep working through the steps below.</span>
@@ -318,11 +371,8 @@ function IntakeSection({ intake }) {
   );
 }
 
-function DirectionSection({ plan, intake, onSendInquiries, sendingInquiries }) {
+function DirectionSection({ plan, intake, onShowVendors }) {
   if (!plan) return null;
-
-  const inquiries = plan.communication?.outboundMessages?.filter((message) => message.type === "inquiry") || [];
-  const alreadySent = inquiries.length > 0;
 
   return (
     <section className="results">
@@ -349,41 +399,44 @@ function DirectionSection({ plan, intake, onSendInquiries, sendingInquiries }) {
           {plan.event.plannerSummary ? <p>{plan.event.plannerSummary}</p> : null}
         </div>
         {plan.event.suggestions?.length ? <div className="suggestions">{plan.event.suggestions.map((item) => <span key={item} className="chip">{item}</span>)}</div> : null}
-        <div className="follow-up-item">Use the shared composer above to refine the event brief and save updates.</div>
-        <div className="action-row section-actions">
-          <button type="button" disabled={plan.isPaused || alreadySent || sendingInquiries} onClick={onSendInquiries}>
-            {plan.isPaused ? "Event paused" : sendingInquiries ? "Sending inquiries..." : alreadySent ? "Outreach already handled" : "Start outreach"}
+        <div className="direction-notes">
+          <div className="follow-up-item">Use the shared composer above to refine the event brief and save updates.</div>
+        </div>
+        <div className="action-row section-actions direction-actions">
+          <button type="button" className="secondary" onClick={onShowVendors}>
+            See vendors
           </button>
         </div>
-        {inquiries.length ? (
-          <div className="follow-up-list">
-            {inquiries.map((message) => {
-              const vendorName = plan.shortlist.find((vendor) => vendor.id === message.vendorId)?.name || message.vendorId;
-              const intendedRecipient = message.delivery?.intendedRecipient || message.intendedRecipient || "unknown";
-              const deliveredTo = message.delivery?.deliveredTo || message.deliveredTo || intendedRecipient;
-              return <div key={message.id} className="follow-up-item"><strong>{vendorName}</strong><br />{message.delivery.ok ? `Outreach sent to ${deliveredTo}.${deliveredTo !== intendedRecipient ? ` Intended vendor: ${intendedRecipient}.` : ""}` : "This option could not be contacted yet."}</div>;
-            })}
-          </div>
-        ) : null}
       </div>
     </section>
   );
 }
 
-function MatchesSection({ plan, onFinalizeVendor }) {
+function MatchesSection({ plan, onFinalizeVendor, onSendInquiries, sendingInquiries }) {
   if (!plan) return null;
   const shortlist = Array.isArray(plan.shortlist) ? plan.shortlist : [];
+  const inquiries = plan.communication?.outboundMessages?.filter((message) => message.type === "inquiry") || [];
+  const alreadySent = inquiries.length > 0;
 
   return (
     <section className="results">
       <div className="panel">
         <h2>Recommended matches</h2>
+        <div className="action-row section-actions matches-actions">
+          <button type="button" disabled={plan.isPaused || alreadySent || sendingInquiries} onClick={onSendInquiries}>
+            {plan.isPaused ? "Event paused" : sendingInquiries ? "Sending inquiries..." : alreadySent ? "Outreach already handled" : "Start outreach"}
+          </button>
+        </div>
         {shortlist.length === 0 ? (
           <div className="follow-up-item">No recommended matches yet. Save the event direction to generate options.</div>
         ) : (
           <div className="shortlist">
             {shortlist.map((vendor) => (
               <article key={vendor.id} className="vendor-card">
+                {(() => {
+                  const inquiryPreview = buildInquiryPreview(plan.event, vendor, plan.communication?.replyTo || "");
+                  return (
+                    <>
                 <div className="vendor-topline">
                   <div><p className="eyebrow">Option {vendor.rank}</p><h3>{vendor.name}</h3></div>
                   <div className="vendor-price-block"><strong>{currency(vendor.estimatedQuote)}</strong><span className={`status-pill status-${vendor.status}`}>{vendor.status}</span></div>
@@ -393,13 +446,16 @@ function MatchesSection({ plan, onFinalizeVendor }) {
                 <p className="fine-print">Primary contact: {vendor.email}</p>
                 <details className="email-preview">
                   <summary>Preview inquiry email</summary>
-                  <p className="fine-print">To: {vendor.inquiryEmail.to}</p>
-                  <p className="fine-print">Subject: {vendor.inquiryEmail.subject}</p>
-                  <pre>{vendor.inquiryEmail.body}</pre>
+                  <p className="fine-print">To: {inquiryPreview.to}</p>
+                  <p className="fine-print">Subject: {inquiryPreview.subject}</p>
+                  <pre>{inquiryPreview.body}</pre>
                 </details>
                 <button type="button" disabled={plan.finalSelection?.vendorId === vendor.id || plan.isPaused} onClick={() => onFinalizeVendor(vendor.id)}>
                   {plan.finalSelection?.vendorId === vendor.id ? "Chosen" : "Choose this option"}
                 </button>
+                    </>
+                  );
+                })()}
               </article>
             ))}
           </div>
@@ -507,7 +563,7 @@ export default function App() {
           setCurrentPage("workspace");
           setActiveStep(0);
           setIsPageTransitioning(false);
-        }, 520);
+        }, 760);
       } else {
         setCurrentPage(nextPage);
         setActiveStep(0);
@@ -595,6 +651,10 @@ export default function App() {
   async function handleStartOutreach() {
     setActiveStep(2);
     await handleSendInquiries();
+  }
+
+  function handleShowVendors() {
+    setActiveStep(2);
   }
 
   async function handleHomeAnalyze(event) {
@@ -695,8 +755,7 @@ export default function App() {
                 <DirectionSection
                   plan={currentPlan}
                   intake={intake}
-                  onSendInquiries={handleStartOutreach}
-                  sendingInquiries={sendingInquiries}
+                  onShowVendors={handleShowVendors}
                 />
               ) : (
                 <section className="panel">
@@ -707,7 +766,12 @@ export default function App() {
             </div>
             <div className="carousel-slide">
               {currentPlan ? (
-                <MatchesSection plan={currentPlan} onFinalizeVendor={handleFinalizeVendor} />
+                <MatchesSection
+                  plan={currentPlan}
+                  onFinalizeVendor={handleFinalizeVendor}
+                  onSendInquiries={handleStartOutreach}
+                  sendingInquiries={sendingInquiries}
+                />
               ) : (
                 <section className="panel">
                   <h2>No recommendations yet</h2>

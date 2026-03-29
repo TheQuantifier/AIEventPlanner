@@ -58,7 +58,7 @@ export function buildPlanReplyAddress(planId) {
   return `${planId}@${inboundDomain}`;
 }
 
-export async function sendEmail({ to, subject, text, replyTo, tags = [] }) {
+export async function sendEmail({ to, subject, text, html, replyTo, tags = [] }) {
   if (!isEmailClientConfigured()) {
     return {
       ok: false,
@@ -81,6 +81,9 @@ export async function sendEmail({ to, subject, text, replyTo, tags = [] }) {
   form.set("to", deliveryRecipient);
   form.set("subject", subject);
   form.set("text", text);
+  if (trim(html)) {
+    form.set("html", html);
+  }
 
   const finalReplyTo = trim(replyTo) || trim(appConfig.emailClient.replyTo);
   if (finalReplyTo) {
