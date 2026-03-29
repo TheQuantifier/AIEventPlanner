@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const apiBaseUrl = __API_BASE_URL__;
 
@@ -90,6 +90,47 @@ function summarizePlan(plan) {
     .join(" | ");
 }
 
+function toTitleCase(value) {
+  return String(value || "")
+    .trim()
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function getEventDisplayName(plan) {
+  if (plan?.event?.title) {
+    return plan.event.title;
+  }
+
+  const typeLabels = {
+    wedding: "Wedding",
+    birthday: "Birthday Celebration",
+    fundraiser: "Fundraiser",
+    retreat: "Retreat",
+    "product-launch": "Product Launch",
+    corporate: "Corporate Event",
+    anniversary: "Anniversary Celebration",
+    "baby-shower": "Baby Shower",
+    conference: "Conference",
+    graduation: "Graduation Celebration",
+    "custom-event": "Event Experience"
+  };
+
+  const location = plan?.event?.location && plan.event.location !== "Flexible" ? toTitleCase(plan.event.location) : "";
+  const theme = String(plan?.event?.theme || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => toTitleCase(part))
+    .join(" ");
+  const type = typeLabels[plan?.event?.type] || toTitleCase(plan?.event?.type || "Event");
+
+  return [location, theme, type].filter(Boolean).join(" ");
+}
+
 function eventFormFromPlan(plan) {
   return {
     brief: plan.event?.brief || "",
@@ -110,42 +151,6 @@ function buildPlanSummary(plan) {
     ["When", plan.event.dateWindow],
     ["Guests", plan.event.guestCount]
   ];
-}
-
-function SystemStatus({ integrations }) {
-  if (!integrations) return null;
-
-  const stageClass = integrations.app?.testing ? "status-card status-card-warning" : "status-card";
-  const mailbox = integrations.emailClient?.testRecipient || "not configured";
-
-  return (
-    <div className="system-status">
-      <div className={stageClass}>
-        <strong>Stage: {integrations.app?.stage || "development"}</strong>
-        <br />
-        {integrations.app?.testing
-          ? `Outbound vendor email is rerouted to the app inbox: ${mailbox}.`
-          : "Outbound vendor email is configured for direct delivery."}
-      </div>
-      <div className="status-grid">
-        <div className="status-card">
-          <strong>Email</strong>
-          <br />
-          {integrations.emailClient?.configured ? integrations.emailClient.deliveryMode : "not configured"}
-        </div>
-        <div className="status-card">
-          <strong>Database</strong>
-          <br />
-          {integrations.db?.configured ? integrations.db.provider || "configured" : "not configured"}
-        </div>
-        <div className="status-card">
-          <strong>AI</strong>
-          <br />
-          {integrations.ai?.configured ? integrations.ai.provider || "configured" : "using fallback planner"}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function DashboardSection({ plans, onEdit, onPause, onDelete }) {
@@ -188,7 +193,7 @@ function DashboardSection({ plans, onEdit, onPause, onDelete }) {
               <article key={plan.id} className="event-row">
                 <div className="event-main">
                   <div className="event-title-row">
-                    <strong>{plan.event?.type || "Event"}</strong>
+                    <strong>{getEventDisplayName(plan)}</strong>
                     <span className="table-pill">{getProgressLabel(plan)}</span>
                   </div>
                   <div className="event-meta">{summarizePlan(plan)}</div>
@@ -211,56 +216,85 @@ function DashboardSection({ plans, onEdit, onPause, onDelete }) {
   );
 }
 
-function EventDetailsForm({ formData, onChange, onSubmit, primaryLabel, secondaryLabel, onSecondary, disabled, children }) {
-  return (
-    <form className="planner-form" onSubmit={onSubmit}>
-      <label className="field field-large">
-        <span>What are you planning?</span>
-        <textarea name="brief" value={formData.brief} onChange={onChange} placeholder="Example: I want a stylish company dinner for 80 people in Chicago this fall." />
-      </label>
-      <div className="grid">
-        <label className="field"><span>Budget</span><input name="budget" value={formData.budget} onChange={onChange} placeholder="$12,000" /></label>
-        <label className="field"><span>Location</span><input name="location" value={formData.location} onChange={onChange} placeholder="Chicago" /></label>
-        <label className="field"><span>Dates</span><input name="dates" value={formData.dates} onChange={onChange} placeholder="June 10 to June 14" /></label>
-        <label className="field"><span>Theme</span><input name="theme" value={formData.theme} onChange={onChange} placeholder="Minimal, garden party, modern luxury" /></label>
-        <label className="field"><span>Guest count</span><input name="guestCount" type="number" min="1" value={formData.guestCount} onChange={onChange} placeholder="100" /></label>
-      </div>
-      <div className="action-row">
-        <button type="submit" disabled={disabled}>{primaryLabel}</button>
-        {secondaryLabel ? <button type="button" className="secondary" onClick={onSecondary}>{secondaryLabel}</button> : null}
-        {children}
-      </div>
-    </form>
-  );
-}
+function SharedComposer({
+  mode,
+  formData,
+  onChange,
+  onSubmit,
+  onResetEdit,
+  onAdvance,
+  editingPlanId,
+  currentPlan,
+  analyzing,
+  savingPlan,
+  intake
+}) {
+  const textareaRef = useRef(null);
 
-function IntakeSection({ formData, onChange, onAnalyze, onResetEdit, intake, editingPlanId, currentPlan, analyzing, onAdvance, advanceDisabled }) {
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "0px";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [formData.brief]);
+
   return (
-    <>
-      <section className="panel intake-panel">
-        <div className="section-heading">
-          <div>
-            <p className="section-kicker">Composer</p>
-            <h2>Create or update event</h2>
-          </div>
-          {editingPlanId ? <div className="editor-state">Editing {currentPlan?.event?.type || "event"} | {editingPlanId}</div> : null}
+    <section className={`panel shared-composer ${mode === "workspace" ? "is-workspace" : "is-home"}`}>
+      <div className="section-heading">
+        <div>
+          <p className="section-kicker">{mode === "workspace" ? "Event workspace" : "Create event"}</p>
+          <h2>{mode === "workspace" ? "Refine the event brief" : "Start with the event idea"}</h2>
         </div>
-        <EventDetailsForm
-          formData={formData}
-          onChange={onChange}
-          onSubmit={onAnalyze}
-          primaryLabel={analyzing ? "Analyzing..." : "Get ideas"}
-          secondaryLabel={editingPlanId ? "Cancel edit" : null}
-          onSecondary={onResetEdit}
-          disabled={analyzing}
-        >
-          {intake?.readiness === "ready-for-research" ? (
-            <button type="button" className="secondary" disabled={advanceDisabled} onClick={onAdvance}>
+        {mode === "workspace" && editingPlanId ? <div className="editor-state">Editing {getEventDisplayName(currentPlan) || "event"} | {editingPlanId}</div> : null}
+      </div>
+      <form className="planner-form" onSubmit={onSubmit}>
+        <label className="field field-large">
+          <span>What are you planning?</span>
+          <textarea
+            ref={textareaRef}
+            name="brief"
+            value={formData.brief}
+            onChange={onChange}
+            placeholder="Example: I want a stylish company dinner for 80 people in Chicago this fall."
+          />
+        </label>
+        <div className={`composer-expanded ${mode === "workspace" ? "is-visible" : ""}`}>
+          <div className="grid">
+            <label className="field"><span>Budget</span><input name="budget" value={formData.budget} onChange={onChange} placeholder="$12,000" /></label>
+            <label className="field"><span>Location</span><input name="location" value={formData.location} onChange={onChange} placeholder="Chicago" /></label>
+            <label className="field"><span>Dates</span><input name="dates" value={formData.dates} onChange={onChange} placeholder="June 10 to June 14" /></label>
+            <label className="field"><span>Theme</span><input name="theme" value={formData.theme} onChange={onChange} placeholder="Minimal, garden party, modern luxury" /></label>
+            <label className="field"><span>Guest count</span><input name="guestCount" type="number" min="1" value={formData.guestCount} onChange={onChange} placeholder="100" /></label>
+          </div>
+        </div>
+        <div className="action-row">
+          <button type="submit" disabled={(mode === "home" ? analyzing : savingPlan) || !formData.brief.trim()}>
+            {mode === "home" ? (analyzing ? "Analyzing..." : "Get ideas") : (savingPlan ? "Saving..." : "Save updates")}
+          </button>
+          {mode === "workspace" && editingPlanId ? (
+            <button type="button" className="secondary" onClick={onResetEdit}>Cancel edit</button>
+          ) : null}
+          {mode === "workspace" && intake?.readiness === "ready-for-research" ? (
+            <button type="button" className="secondary" disabled={savingPlan} onClick={onAdvance}>
               Continue to plan
             </button>
           ) : null}
-        </EventDetailsForm>
-      </section>
+          {mode === "home" ? (
+            <span className="composer-hint">The workspace opens after intake analysis.</span>
+          ) : null}
+          {mode === "workspace" ? (
+            <span className="composer-hint">Update the brief here and keep working through the steps below.</span>
+          ) : null}
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function IntakeSection({ intake }) {
+  return (
+    <>
       {intake ? (
         <section className="panel">
           <h2>Next details</h2>
@@ -274,12 +308,17 @@ function IntakeSection({ formData, onChange, onAnalyze, onResetEdit, intake, edi
                 ))}
           </div>
         </section>
-      ) : null}
+      ) : (
+        <section className="panel">
+          <h2>Start with the brief</h2>
+          <p>Capture the event idea above to generate intake guidance and move into the planning flow.</p>
+        </section>
+      )}
     </>
   );
 }
 
-function DirectionSection({ plan, intake, formData, onChange, onSave, savingPlan, onSendInquiries, sendingInquiries }) {
+function DirectionSection({ plan, intake, onSendInquiries, sendingInquiries }) {
   if (!plan) return null;
 
   const inquiries = plan.communication?.outboundMessages?.filter((message) => message.type === "inquiry") || [];
@@ -310,13 +349,7 @@ function DirectionSection({ plan, intake, formData, onChange, onSave, savingPlan
           {plan.event.plannerSummary ? <p>{plan.event.plannerSummary}</p> : null}
         </div>
         {plan.event.suggestions?.length ? <div className="suggestions">{plan.event.suggestions.map((item) => <span key={item} className="chip">{item}</span>)}</div> : null}
-        <EventDetailsForm
-          formData={formData}
-          onChange={onChange}
-          onSubmit={onSave}
-          primaryLabel={savingPlan ? "Saving..." : "Save updates"}
-          disabled={savingPlan}
-        />
+        <div className="follow-up-item">Use the shared composer above to refine the event brief and save updates.</div>
         <div className="action-row section-actions">
           <button type="button" disabled={plan.isPaused || alreadySent || sendingInquiries} onClick={onSendInquiries}>
             {plan.isPaused ? "Event paused" : sendingInquiries ? "Sending inquiries..." : alreadySent ? "Outreach already handled" : "Start outreach"}
@@ -420,7 +453,6 @@ function CommunicationSection({ plan }) {
 
 export default function App() {
   const [dashboardPlans, setDashboardPlans] = useState([]);
-  const [systemStatus, setSystemStatus] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
   const [intake, setIntake] = useState(null);
   const [currentPlan, setCurrentPlan] = useState(null);
@@ -429,10 +461,11 @@ export default function App() {
   const [savingPlan, setSavingPlan] = useState(false);
   const [sendingInquiries, setSendingInquiries] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
+  const [currentPage, setCurrentPage] = useState("home");
+  const [isPageTransitioning, setIsPageTransitioning] = useState(false);
 
   useEffect(() => {
     loadDashboardPlans();
-    loadSystemStatus();
   }, []);
 
   async function loadDashboardPlans() {
@@ -441,15 +474,6 @@ export default function App() {
       setDashboardPlans(sortPlans(Array.isArray(payload.items) ? payload.items : []));
     } catch (error) {
       alert(error.message);
-    }
-  }
-
-  async function loadSystemStatus() {
-    try {
-      const payload = await requestJson(`${apiBaseUrl}/health`, {}, "Status request failed");
-      setSystemStatus(payload.integrations);
-    } catch {
-      setSystemStatus(null);
     }
   }
 
@@ -468,13 +492,26 @@ export default function App() {
     setFormData((current) => ({ ...current, [name]: value }));
   }
 
-  async function handleAnalyze(event) {
+  async function handleAnalyze(event, nextPage = currentPage) {
     event.preventDefault();
     setAnalyzing(true);
     try {
       const nextIntake = await requestJson(`${apiBaseUrl}/api/intake`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(formData) }, "The API could not analyze the event.");
       setIntake(nextIntake);
-      setCurrentPlan(null);
+      if (!editingPlanId) {
+        setCurrentPlan(null);
+      }
+      if (currentPage === "home" && nextPage === "workspace") {
+        setIsPageTransitioning(true);
+        window.setTimeout(() => {
+          setCurrentPage("workspace");
+          setActiveStep(0);
+          setIsPageTransitioning(false);
+        }, 520);
+      } else {
+        setCurrentPage(nextPage);
+        setActiveStep(0);
+      }
     } catch (error) {
       alert(error.message);
     } finally {
@@ -508,6 +545,8 @@ export default function App() {
     setIntake(null);
     setFormData(emptyForm);
     setActiveStep(0);
+    setCurrentPage("home");
+    setIsPageTransitioning(false);
   }
 
   function handleEditPlan(plan) {
@@ -516,6 +555,7 @@ export default function App() {
     setIntake({ eventType: plan.event.type, readiness: "ready-for-research", missingFields: [], followUpQuestions: [], suggestions: plan.event.suggestions || [], assistantMessage: "Loaded existing plan into the editor." });
     setFormData(eventFormFromPlan(plan));
     setActiveStep(1);
+    setCurrentPage("workspace");
   }
 
   async function handleTogglePause(plan) {
@@ -557,6 +597,10 @@ export default function App() {
     await handleSendInquiries();
   }
 
+  async function handleHomeAnalyze(event) {
+    await handleAnalyze(event, "workspace");
+  }
+
   async function handleFinalizeVendor(vendorId) {
     if (!currentPlan) return;
     try {
@@ -584,97 +628,119 @@ export default function App() {
   return (
     <main className="shell">
       <section className="topbar">
-        <div><p className="eyebrow">AI Event Planner</p><h1>Operations dashboard</h1></div>
-        <div className="topbar-badge">Workflow orchestration for live event plans</div>
-      </section>
-      <section className="dashboard-grid">
-        <DashboardSection plans={dashboardPlans} onEdit={handleEditPlan} onPause={handleTogglePause} onDelete={handleDeletePlan} />
-        <section className="hero"><SystemStatus integrations={systemStatus} /></section>
-      </section>
-      <section className="carousel">
-        <div className="carousel-tabs">
-          {steps.map((step, index) => (
-            <button
-              key={step.id}
-              type="button"
-              className={`tab-button ${activeStep === index ? "active" : ""}`}
-              onClick={() => { if (canAccessStep(index)) setActiveStep(index); }}
-              disabled={!canAccessStep(index)}
-            >
-              <span className="tab-index">{index + 1}</span>
-              {step.label}
-            </button>
-          ))}
+        <div>
+          <p className="eyebrow">AI Event Planner</p>
+          <h1>{currentPage === "home" ? "Operations dashboard" : "Event workspace"}</h1>
         </div>
-        <div className="carousel-track" style={{ transform: `translateX(-${activeStep * 100}%)` }}>
-          <div className="carousel-slide">
-            <IntakeSection
+        <div className="topbar-actions">
+          {currentPage === "workspace" ? (
+            <button type="button" className="secondary" onClick={() => setCurrentPage("home")}>
+              Back to dashboard
+            </button>
+          ) : null}
+          <div className="topbar-badge">Workflow orchestration for live event plans</div>
+        </div>
+      </section>
+
+      {currentPage === "home" ? (
+        <div className={`home-stage ${isPageTransitioning ? "is-transitioning" : ""}`}>
+          <div className="home-dashboard">
+            <DashboardSection plans={dashboardPlans} onEdit={handleEditPlan} onPause={handleTogglePause} onDelete={handleDeletePlan} />
+          </div>
+          <div className="home-composer-wrap">
+            <SharedComposer
+              mode="home"
               formData={formData}
               onChange={handleFieldChange}
-              onAnalyze={handleAnalyze}
-              onResetEdit={handleResetEdit}
-              intake={intake}
-              editingPlanId={editingPlanId}
-              currentPlan={currentPlan}
+              onSubmit={handleHomeAnalyze}
               analyzing={analyzing}
-              onAdvance={handleContinue}
-              advanceDisabled={savingPlan}
             />
           </div>
-          <div className="carousel-slide">
-            {currentPlan ? (
-              <DirectionSection
-                plan={currentPlan}
-                intake={intake}
-                formData={formData}
-                onChange={handleFieldChange}
-                onSave={handleSavePlan}
-                savingPlan={savingPlan}
-                onSendInquiries={handleStartOutreach}
-                sendingInquiries={sendingInquiries}
-              />
-            ) : (
-              <section className="panel">
-                <h2>Create an event plan to continue</h2>
-                <p>Complete the intake details and continue to generate event direction.</p>
-              </section>
-            )}
-          </div>
-          <div className="carousel-slide">
-            {currentPlan ? (
-              <MatchesSection plan={currentPlan} onFinalizeVendor={handleFinalizeVendor} />
-            ) : (
-              <section className="panel">
-                <h2>No recommendations yet</h2>
-                <p>Generate the event plan first to see recommended matches.</p>
-              </section>
-            )}
-          </div>
-          <div className="carousel-slide">
-            {currentPlan ? (
-              <CommunicationSection plan={currentPlan} />
-            ) : (
-              <section className="panel">
-                <h2>No communications yet</h2>
-                <p>Once outreach begins, the communication log will appear here.</p>
-              </section>
-            )}
-          </div>
         </div>
-        <div className="carousel-nav">
-          <button type="button" className="secondary" onClick={() => setActiveStep((step) => Math.max(0, step - 1))} disabled={activeStep === 0}>
-            Previous
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => setActiveStep((step) => Math.min(steps.length - 1, step + 1))}
-            disabled={!canAccessStep(activeStep + 1)}
-          >
-            Next
-          </button>
-        </div>
-      </section>
+      ) : (
+        <section className="carousel">
+          <SharedComposer
+            mode="workspace"
+            formData={formData}
+            onChange={handleFieldChange}
+            onSubmit={handleSavePlan}
+            onResetEdit={handleResetEdit}
+            onAdvance={handleContinue}
+            editingPlanId={editingPlanId}
+            currentPlan={currentPlan}
+            analyzing={analyzing}
+            savingPlan={savingPlan}
+            intake={intake}
+          />
+          <div className="carousel-tabs">
+            {steps.map((step, index) => (
+              <button
+                key={step.id}
+                type="button"
+                className={`tab-button ${activeStep === index ? "active" : ""}`}
+                onClick={() => { if (canAccessStep(index)) setActiveStep(index); }}
+                disabled={!canAccessStep(index)}
+              >
+                <span className="tab-index">{index + 1}</span>
+                {step.label}
+              </button>
+            ))}
+          </div>
+          <div className="carousel-track" style={{ transform: `translateX(-${activeStep * 100}%)` }}>
+            <div className="carousel-slide">
+              <IntakeSection intake={intake} />
+            </div>
+            <div className="carousel-slide">
+              {currentPlan ? (
+                <DirectionSection
+                  plan={currentPlan}
+                  intake={intake}
+                  onSendInquiries={handleStartOutreach}
+                  sendingInquiries={sendingInquiries}
+                />
+              ) : (
+                <section className="panel">
+                  <h2>Create an event plan to continue</h2>
+                  <p>Complete the intake details and continue to generate event direction.</p>
+                </section>
+              )}
+            </div>
+            <div className="carousel-slide">
+              {currentPlan ? (
+                <MatchesSection plan={currentPlan} onFinalizeVendor={handleFinalizeVendor} />
+              ) : (
+                <section className="panel">
+                  <h2>No recommendations yet</h2>
+                  <p>Generate the event plan first to see recommended matches.</p>
+                </section>
+              )}
+            </div>
+            <div className="carousel-slide">
+              {currentPlan ? (
+                <CommunicationSection plan={currentPlan} />
+              ) : (
+                <section className="panel">
+                  <h2>No communications yet</h2>
+                  <p>Once outreach begins, the communication log will appear here.</p>
+                </section>
+              )}
+            </div>
+          </div>
+          <div className="carousel-nav">
+            <button type="button" className="secondary" onClick={() => setActiveStep((step) => Math.max(0, step - 1))} disabled={activeStep === 0}>
+              Previous
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setActiveStep((step) => Math.min(steps.length - 1, step + 1))}
+              disabled={!canAccessStep(activeStep + 1)}
+            >
+              Next
+            </button>
+          </div>
+        </section>
+      )}
     </main>
   );
 }

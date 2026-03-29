@@ -15,6 +15,60 @@ function normalizeText(value) {
   return String(value || "").trim();
 }
 
+function toTitleCase(value) {
+  return normalizeText(value)
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function formatEventTypeLabel(type) {
+  const labels = {
+    wedding: "Wedding",
+    birthday: "Birthday Celebration",
+    fundraiser: "Fundraiser",
+    retreat: "Retreat",
+    "product-launch": "Product Launch",
+    corporate: "Corporate Event",
+    anniversary: "Anniversary Celebration",
+    "baby-shower": "Baby Shower",
+    conference: "Conference",
+    graduation: "Graduation Celebration",
+    "custom-event": "Event Experience"
+  };
+
+  return labels[normalizeText(type).toLowerCase()] || toTitleCase(type || "Event");
+}
+
+function shortenTheme(theme) {
+  return normalizeText(theme)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function generateEventTitle({ type, theme, location }) {
+  const parts = [];
+  const locationPart = normalizeText(location) && normalizeText(location) !== "Flexible" ? toTitleCase(location) : "";
+  const themePart = shortenTheme(theme);
+  const typePart = formatEventTypeLabel(type);
+
+  if (locationPart) {
+    parts.push(locationPart);
+  }
+
+  if (themePart) {
+    parts.push(themePart);
+  }
+
+  parts.push(typePart);
+
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
 async function persistPlan(plan) {
   plans.set(plan.id, plan);
 
@@ -173,6 +227,7 @@ function buildFallbackEvent(payload) {
 
   return {
     brief,
+    title: generateEventTitle({ type, theme, location }),
     type,
     theme,
     budget,
@@ -246,6 +301,11 @@ function coerceEvent(payload, eventData = {}) {
 
   return {
     brief: normalizeText(eventData.brief || payload.brief),
+    title: normalizeText(eventData.title) || generateEventTitle({
+      type: eventData.type || inferEventType(payload.brief),
+      theme: eventData.theme || payload.theme,
+      location: eventData.location || payload.location
+    }),
     type: normalizeText(eventData.type || inferEventType(payload.brief)),
     theme: normalizeText(eventData.theme || payload.theme),
     budget: Number.isFinite(budget) && budget > 0 ? budget : parseBudget(payload.budget),
