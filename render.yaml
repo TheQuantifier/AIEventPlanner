@@ -49,7 +49,7 @@ services:
   - type: web
     name: ai-event-planner-web
     runtime: node
-    buildCommand: npm install
+    buildCommand: npm install && npm run build:web
     startCommand: npm run start:web
     envVars:
       - key: APP_STAGE

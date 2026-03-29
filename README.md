@@ -17,7 +17,7 @@ Minimal split-stack prototype for an autonomous event-planning workflow.
 ## Project layout
 
 - `api/` HTTP API and event-planning orchestration logic.
-- `web/` static client and lightweight local web server.
+- `web/` React client (Vite in development, built static assets in production).
 
 API dashboard endpoints:
 
@@ -29,19 +29,39 @@ API dashboard endpoints:
 
 ## Run locally
 
-1. Start the API:
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Start both services:
+
+```bash
+npm run dev
+```
+
+3. Open `http://localhost:3000`.
+
+You can still run them separately if needed.
+
+API only:
 
 ```bash
 npm run dev:api
 ```
 
-2. In another terminal, start the web app:
+Web only:
 
 ```bash
 npm run dev:web
 ```
 
-3. Open `http://localhost:3000`.
+Production web build:
+
+```bash
+npm run build:web
+```
 
 ## Environment variables
 
@@ -98,6 +118,7 @@ Mailgun notes:
 Render notes:
 
 - Deploy the API service with `npm start`
+- Build the React web app with `npm run build:web`
 - Deploy the web service with `npm run start:web`
 - Set `APP_STAGE=testing` on both services until you are ready for real vendor delivery
 - Set `APP_BASE_URL` on the API service to the API's public Render URL or custom domain

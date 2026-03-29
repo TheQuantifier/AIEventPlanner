@@ -5,40 +5,41 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const distDir = path.join(__dirname, "dist");
 const PORT = Number(process.env.PORT || 3000);
-const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:4000";
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
-  ".js": "application/javascript; charset=utf-8"
+  ".js": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon"
 };
 
 const server = http.createServer(async (request, response) => {
-  const requestPath = request.url === "/" ? "/index.html" : request.url;
-  const filePath = path.join(__dirname, requestPath || "/index.html");
+  const url = new URL(request.url || "/", "http://localhost");
+  const requestPath = url.pathname === "/" ? "/index.html" : url.pathname;
+  const filePath = path.join(distDir, requestPath);
 
   try {
-    let file = await fs.readFile(filePath);
+    const file = await fs.readFile(filePath);
     const extension = path.extname(filePath);
-
-    if (requestPath === "/index.html") {
-      const html = file
-        .toString("utf8")
-        .replace(
-          "</body>",
-          `  <script>window.AI_EVENT_PLANNER_CONFIG = ${JSON.stringify({ apiBaseUrl: API_BASE_URL })};</script>\n  </body>`
-        );
-      file = Buffer.from(html, "utf8");
-    }
 
     response.writeHead(200, {
       "Content-Type": mimeTypes[extension] || "text/plain; charset=utf-8"
     });
     response.end(file);
   } catch {
-    response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    response.end("Not found");
+    try {
+      const file = await fs.readFile(path.join(distDir, "index.html"));
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(file);
+    } catch {
+      response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      response.end("Build output not found. Run npm run build:web first.");
+    }
   }
 });
 

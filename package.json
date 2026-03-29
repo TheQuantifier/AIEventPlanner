@@ -4,15 +4,20 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "pg": "^8.13.1"
+    "@vitejs/plugin-react": "^6.0.1",
+    "pg": "^8.13.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "vite": "^8.0.3"
   },
   "scripts": {
     "dev": "node scripts/dev.js",
     "dev:api": "node --env-file=.env api/server.js",
-    "dev:web": "node --env-file=.env web/server.js",
+    "dev:web": "vite --config web/vite.config.js",
+    "build:web": "vite build --config web/vite.config.js",
     "start": "node api/server.js",
     "start:web": "node web/server.js",
-    "check": "node --check api/server.js && node --check web/server.js && node --check web/app.js && node --check scripts/setup-mailgun-route.js",
+    "check": "node --check api/server.js && node --check web/server.js && node --check scripts/setup-mailgun-route.js && node --check scripts/dev.js && npm run build:web",
     "setup:mailgun-route": "node --env-file=.env scripts/setup-mailgun-route.js"
   }
 }
