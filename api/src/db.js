@@ -16,6 +16,19 @@ function numberOrDefault(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function toIsoStringOrFallback(value, fallback = null) {
+  if (!value) {
+    return fallback;
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? fallback : value.toISOString();
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed.toISOString();
+}
+
 function sortByOrder(left, right) {
   return Number(left.sort_order) - Number(right.sort_order);
 }
@@ -43,8 +56,8 @@ function mapPlanRow(planRow, suggestions, vendorRows, serviceAreaRows, outboundR
 
   return {
     id: planRow.id,
-    createdAt: planRow.created_at.toISOString(),
-    updatedAt: planRow.updated_at.toISOString(),
+    createdAt: toIsoStringOrFallback(planRow.created_at, new Date(0).toISOString()),
+    updatedAt: toIsoStringOrFallback(planRow.updated_at, new Date(0).toISOString()),
     workflowState: planRow.workflow_state,
     isPaused: Boolean(planRow.is_paused),
     owner: {
@@ -72,7 +85,7 @@ function mapPlanRow(planRow, suggestions, vendorRows, serviceAreaRows, outboundR
           id: message.id,
           type: message.type,
           vendorId: message.vendor_id,
-          createdAt: message.created_at.toISOString(),
+          createdAt: toIsoStringOrFallback(message.created_at, new Date(0).toISOString()),
           subject: message.subject || "",
           intendedRecipient: message.intended_recipient || "",
           deliveredTo: message.delivered_to || null,
@@ -95,7 +108,7 @@ function mapPlanRow(planRow, suggestions, vendorRows, serviceAreaRows, outboundR
         .sort((left, right) => new Date(left.received_at).getTime() - new Date(right.received_at).getTime())
         .map((message) => ({
           id: message.id,
-          receivedAt: message.received_at.toISOString(),
+          receivedAt: toIsoStringOrFallback(message.received_at, new Date(0).toISOString()),
           from: message.from_email || "",
           subject: message.subject || "",
           text: message.body_text || "",
@@ -112,7 +125,7 @@ function mapPlanRow(planRow, suggestions, vendorRows, serviceAreaRows, outboundR
       ? {
           vendorId: planRow.final_selection_vendor_id,
           vendorName: planRow.final_selection_vendor_name || "",
-          selectedAt: planRow.final_selection_selected_at?.toISOString?.() || null
+          selectedAt: toIsoStringOrFallback(planRow.final_selection_selected_at, null)
         }
       : null
   };

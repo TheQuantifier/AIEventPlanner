@@ -1,7 +1,109 @@
 import { appConfig } from "./config/env.js";
+import crypto from "node:crypto";
+import { isDbConfigured, query } from "./db.js";
+
+const intakeCache = new Map();
+const planCache = new Map();
+const INTAKE_CACHE_TTL_MS = 5 * 60 * 1000;
+const PLAN_CACHE_TTL_MS = 15 * 60 * 1000;
 
 function trim(value) {
   return String(value || "").trim();
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function createCacheKey(prefix, payload) {
+  return crypto
+    .createHash("sha256")
+    .update(`${prefix}:${trim(appConfig.ai.provider).toLowerCase()}:${trim(appConfig.ai.model || "gemini-2.5-flash")}:${stableStringify(payload)}`)
+    .digest("hex");
+}
+
+function getCachedValue(cache, key) {
+  const entry = cache.get(key);
+
+  if (!entry) {
+    return null;
+  }
+
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+
+  return entry.value;
+}
+
+function setCachedValue(cache, key, value, ttlMs) {
+  cache.set(key, {
+    value,
+    expiresAt: Date.now() + ttlMs
+  });
+  return value;
+}
+
+async function getPersistentCachedValue(key) {
+  if (!isDbConfigured()) {
+    return null;
+  }
+
+  try {
+    const result = await query(
+      `
+        select response_json
+        from ai_response_cache
+        where cache_key = $1
+          and expires_at > now()
+        limit 1
+      `,
+      [key]
+    );
+
+    return result.rows[0]?.response_json || null;
+  } catch {
+    return null;
+  }
+}
+
+async function setPersistentCachedValue(key, kind, value, ttlMs) {
+  if (!isDbConfigured()) {
+    return value;
+  }
+
+  try {
+    await query(
+      `
+        insert into ai_response_cache (cache_key, cache_kind, response_json, expires_at, updated_at)
+        values ($1, $2, $3::jsonb, now() + ($4 * interval '1 millisecond'), now())
+        on conflict (cache_key) do update
+        set cache_kind = excluded.cache_kind,
+            response_json = excluded.response_json,
+            expires_at = excluded.expires_at,
+            updated_at = now()
+      `,
+      [key, kind, JSON.stringify(value), ttlMs]
+    );
+
+    await query("delete from ai_response_cache where expires_at <= now()");
+  } catch {
+    return value;
+  }
+
+  return value;
 }
 
 function apiUrl() {
@@ -61,6 +163,14 @@ async function callGeminiJson({ prompt, useSearch }) {
 }
 
 export async function generateIntakeWithAi(payload) {
+  const cacheKey = createCacheKey("intake", payload);
+  const cached = getCachedValue(intakeCache, cacheKey) || await getPersistentCachedValue(cacheKey);
+
+  if (cached) {
+    setCachedValue(intakeCache, cacheKey, cached, INTAKE_CACHE_TTL_MS);
+    return cached;
+  }
+
   const prompt = `
 You are an event planning assistant.
 Analyze the user input and return only valid JSON with this shape:
@@ -83,10 +193,20 @@ User input:
 ${JSON.stringify(payload, null, 2)}
 `;
 
-  return callGeminiJson({ prompt, useSearch: false });
+  const result = await callGeminiJson({ prompt, useSearch: false });
+  setCachedValue(intakeCache, cacheKey, result, INTAKE_CACHE_TTL_MS);
+  return setPersistentCachedValue(cacheKey, "intake", result, INTAKE_CACHE_TTL_MS);
 }
 
 export async function generatePlanWithAi(payload) {
+  const cacheKey = createCacheKey("plan", payload);
+  const cached = getCachedValue(planCache, cacheKey) || await getPersistentCachedValue(cacheKey);
+
+  if (cached) {
+    setCachedValue(planCache, cacheKey, cached, PLAN_CACHE_TTL_MS);
+    return cached;
+  }
+
   const prompt = `
 You are an event planning assistant with web search enabled.
 Return only valid JSON with this shape:
@@ -132,5 +252,7 @@ User input:
 ${JSON.stringify(payload, null, 2)}
 `;
 
-  return callGeminiJson({ prompt, useSearch: true });
+  const result = await callGeminiJson({ prompt, useSearch: true });
+  setCachedValue(planCache, cacheKey, result, PLAN_CACHE_TTL_MS);
+  return setPersistentCachedValue(cacheKey, "plan", result, PLAN_CACHE_TTL_MS);
 }

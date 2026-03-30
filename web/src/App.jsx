@@ -151,6 +151,17 @@ function eventFormFromPlan(plan) {
   };
 }
 
+function buildEditorIntakeFromPlan(plan, assistantMessage = "Recommendations refreshed from the latest event details.") {
+  return {
+    eventType: plan?.event?.type || "",
+    readiness: "ready-for-research",
+    missingFields: [],
+    followUpQuestions: [],
+    suggestions: plan?.event?.suggestions || [],
+    assistantMessage
+  };
+}
+
 function buildPlanSummary(plan) {
   return [
     ["Event", plan.event.type],
@@ -174,7 +185,7 @@ function joinEmailLines(lines) {
   return lines.filter((line) => line !== undefined && line !== null).join("\n");
 }
 
-function buildInquiryPreview(event, vendor, replyTo) {
+function buildInquiryPreview(event, vendor) {
   const eventLabel = formatEventLabel(event);
 
   return {
@@ -204,9 +215,6 @@ function buildInquiryPreview(event, vendor, replyTo) {
       "",
       "",
       "A short reply is fine. We are mainly trying to confirm fit, availability, and budget alignment.",
-      "",
-      "",
-      replyTo ? `You can reply directly to: ${replyTo}` : "",
       "",
       "",
       "Best,",
@@ -443,7 +451,7 @@ function MatchesSection({ plan, onFinalizeVendor, onSendInquiries, sendingInquir
             {shortlist.map((vendor) => (
               <article key={vendor.id} className="vendor-card">
                 {(() => {
-                  const inquiryPreview = buildInquiryPreview(plan.event, vendor, plan.communication?.replyTo || "");
+                  const inquiryPreview = buildInquiryPreview(plan.event, vendor);
                   return (
                     <>
                 <div className="vendor-topline">
@@ -761,20 +769,18 @@ export default function App() {
   async function handleContinue() {
     setSavingPlan(true);
     try {
-      const nextIntake = await requestJson(
-        `${apiBaseUrl}/api/intake`,
-        {
-          method: "POST",
-          headers: authHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify(formData)
-        },
-        "The API could not analyze the event."
-      );
-      setIntake(nextIntake);
-
       const plan = await requestJson(`${apiBaseUrl}/api/plans${editingPlanId ? `/${editingPlanId}` : ""}`, { method: editingPlanId ? "PUT" : "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(formData) }, "The API could not generate a plan.");
       setCurrentPlan(plan);
       setEditingPlanId(plan.id);
+      setFormData(eventFormFromPlan(plan));
+      setIntake(
+        buildEditorIntakeFromPlan(
+          plan,
+          editingPlanId
+            ? "Event details updated. Stored data and recommendations were regenerated from the latest inputs."
+            : "Plan created from the latest event details."
+        )
+      );
       upsertPlan(plan);
       setActiveStep(1);
     } catch (error) {
@@ -802,7 +808,7 @@ export default function App() {
   function handleEditPlan(plan) {
     setEditingPlanId(plan.id);
     setCurrentPlan(plan);
-    setIntake({ eventType: plan.event.type, readiness: "ready-for-research", missingFields: [], followUpQuestions: [], suggestions: plan.event.suggestions || [], assistantMessage: "Loaded existing plan into the editor." });
+    setIntake(buildEditorIntakeFromPlan(plan, "Loaded existing plan into the editor."));
     setFormData(eventFormFromPlan(plan));
     setActiveStep(1);
     setCurrentPage("workspace");

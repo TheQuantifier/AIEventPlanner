@@ -504,10 +504,10 @@ async function buildPlanDocument(payload, user, existingPlan = null) {
 
   const communication = {
     replyTo,
-    outboundMessages: existingPlan?.communication?.outboundMessages || [],
-    inboundMessages: existingPlan?.communication?.inboundMessages || []
+    outboundMessages: [],
+    inboundMessages: []
   };
-  const preservedShortlist = preserveShortlistState(shortlist, existingPlan?.shortlist || []);
+  const preservedShortlist = preserveShortlistState(shortlist, []);
 
   return {
     id: planId,
@@ -520,12 +520,36 @@ async function buildPlanDocument(payload, user, existingPlan = null) {
     communication,
     automation: {
       inquiryEmailsDrafted: preservedShortlist.length,
-      inquiryEmailsSent: communication.outboundMessages.filter((message) => message.type === "inquiry" && message.delivery?.ok).length,
-      vendorRepliesReceived: communication.inboundMessages.length
+      inquiryEmailsSent: 0,
+      vendorRepliesReceived: 0
     },
     shortlist: preservedShortlist,
     finalSelection: null
   };
+}
+
+function sameNormalizedValue(left, right) {
+  return normalizeText(left).toLowerCase() === normalizeText(right).toLowerCase();
+}
+
+function isEquivalentEventInput(payload, existingPlan) {
+  if (!existingPlan?.event) {
+    return false;
+  }
+
+  const existingBudget = Number(existingPlan.event.budget) || parseBudget(existingPlan.event.budgetLabel);
+  const nextBudget = parseBudget(payload.budget);
+  const existingGuestCount = Number(existingPlan.event.guestCount) || 0;
+  const nextGuestCount = deriveGuestCount(payload.guestCount);
+
+  return (
+    sameNormalizedValue(payload.brief, existingPlan.event.brief) &&
+    sameNormalizedValue(payload.location, existingPlan.event.location) &&
+    sameNormalizedValue(payload.dates, existingPlan.event.dateWindow) &&
+    sameNormalizedValue(payload.theme, existingPlan.event.theme) &&
+    nextBudget === existingBudget &&
+    nextGuestCount === existingGuestCount
+  );
 }
 
 export async function createPlan(payload, user) {
@@ -539,6 +563,10 @@ export async function updatePlan(planId, payload, user) {
 
   if (!existingPlan) {
     return null;
+  }
+
+  if (isEquivalentEventInput(payload, existingPlan)) {
+    return refreshPlanDrafts(existingPlan);
   }
 
   const plan = await buildPlanDocument(payload, user, existingPlan);
