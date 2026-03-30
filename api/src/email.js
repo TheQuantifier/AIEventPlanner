@@ -29,12 +29,12 @@ function renderHtmlEmail({ greeting, intro, sections, outro }) {
   const sectionMarkup = sections
     .map((section) => {
       if (section.type === "list") {
-        return `<p><strong>${escapeHtml(section.title)}</strong></p><ol>${section.items
+        return `<p style="margin:0 0 16px;"><strong>${escapeHtml(section.title)}</strong></p><ol style="margin:0 0 16px 24px;padding:0;">${section.items
           .map((item) => `<li>${escapeHtml(item)}</li>`)
           .join("")}</ol>`;
       }
 
-      return `<p><strong>${escapeHtml(section.title)}</strong><br />${section.lines
+      return `<p style="margin:0 0 16px;"><strong>${escapeHtml(section.title)}</strong><br />${section.lines
         .filter((line) => line !== undefined && line !== null && line !== "")
         .map((line) => escapeHtml(line))
         .join("<br />")}</p>`;
@@ -44,15 +44,13 @@ function renderHtmlEmail({ greeting, intro, sections, outro }) {
   return [
     "<!doctype html>",
     '<html lang="en">',
-    "<body style=\"margin:0;padding:0;background:#0b1020;color:#e8edf7;font-family:Inter,Arial,sans-serif;\">",
-    '<div style="max-width:640px;margin:0 auto;padding:32px 24px;">',
-    '<div style="background:linear-gradient(180deg,#121a31 0%,#0f162a 100%);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:28px 24px;line-height:1.6;">',
+    "<body style=\"margin:0;padding:24px;background:#ffffff;color:#111111;font-family:Arial,sans-serif;line-height:1.6;\">",
+    '<div style="max-width:640px;">',
     `<p style="margin:0 0 16px;">${escapeHtml(greeting)}</p>`,
     `<p style="margin:0 0 16px;">${escapeHtml(intro)}</p>`,
     sectionMarkup,
     `<p style="margin:0 0 16px;">${escapeHtml(outro)}</p>`,
     '<p style="margin:16px 0 0;">Best,<br />AI Event Planner</p>',
-    "</div>",
     "</div>",
     "</body>",
     "</html>"

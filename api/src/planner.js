@@ -811,6 +811,57 @@ function extractEmailAddress(value) {
   return String(value || "").match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i)?.[1] || "";
 }
 
+function trimQuotedReplyText(value) {
+  const text = String(value || "").replace(/\r\n/g, "\n").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  const quoteStartPatterns = [
+    /^\s*On .+wrote:\s*$/im,
+    /^\s*From:\s.+$/im,
+    /^\s*Sent:\s.+$/im,
+    /^\s*Subject:\s.+$/im,
+    /^\s*-{2,}\s*Original Message\s*-{2,}\s*$/im,
+    /^\s*_{2,}\s*$/im
+  ];
+
+  let endIndex = text.length;
+  for (const pattern of quoteStartPatterns) {
+    const match = pattern.exec(text);
+    if (match && typeof match.index === "number") {
+      endIndex = Math.min(endIndex, match.index);
+    }
+  }
+
+  const beforeQuotedBlock = text.slice(0, endIndex);
+  const cleanedLines = beforeQuotedBlock
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith(">"));
+
+  return cleanedLines.join("\n").trim();
+}
+
+function extractInboundReplyText(payload) {
+  const preferred = [
+    payload["stripped-text"],
+    payload["body-plain"],
+    payload.text,
+    payload["stripped-html"],
+    payload.html
+  ];
+
+  for (const candidate of preferred) {
+    const trimmed = trimQuotedReplyText(candidate);
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  return "";
+}
+
 function extractPlanAddress(payload) {
   const candidates = [];
   const headerEntries = parseHeaderEntries(payload);
@@ -883,7 +934,7 @@ export async function recordInboundReply(payload) {
     receivedAt: new Date().toISOString(),
     from: fromEmail || "unknown",
     subject: String(payload.subject || payload.Subject || ""),
-    text: String(payload["body-plain"] || payload["stripped-text"] || payload.text || payload["stripped-html"] || payload.html || ""),
+    text: extractInboundReplyText(payload),
     vendorId: vendor?.id || null
   };
 
