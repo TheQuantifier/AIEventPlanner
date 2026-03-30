@@ -39,7 +39,15 @@ function sortByOrder(left, right) {
   return Number(left.sort_order) - Number(right.sort_order);
 }
 
-function mapPlanRow(planRow, suggestions, vendorRows, serviceAreaRows, outboundRows, inboundRows) {
+function humanizeCategoryLabel(value) {
+  return String(value || "")
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function mapPlanRow(planRow, suggestions, vendorCategoryRows, vendorRows, serviceAreaRows, outboundRows, inboundRows) {
   const vendors = vendorRows
     .map((vendor) => ({
       id: vendor.id,
@@ -59,6 +67,21 @@ function mapPlanRow(planRow, suggestions, vendorRows, serviceAreaRows, outboundR
         .map((area) => area.area)
     }))
     .sort((left, right) => left.rank - right.rank);
+  const vendorCategories = vendorCategoryRows.length > 0
+    ? vendorCategoryRows
+        .sort(sortByOrder)
+        .map((item) => ({
+          key: item.category_key,
+          label: item.label,
+          description: item.description || "",
+          selected: Boolean(item.is_selected)
+        }))
+    : Array.from(new Set(vendors.map((vendor) => vendor.category).filter(Boolean))).map((categoryKey) => ({
+        key: categoryKey,
+        label: humanizeCategoryLabel(categoryKey),
+        description: "",
+        selected: true
+      }));
 
   return {
     id: planRow.id,
@@ -83,6 +106,7 @@ function mapPlanRow(planRow, suggestions, vendorRows, serviceAreaRows, outboundR
       plannerSummary: planRow.event_planner_summary || "",
       suggestions: suggestions.sort(sortByOrder).map((item) => item.value)
     },
+    vendorCategories,
     communication: {
       replyTo: planRow.reply_to || "",
       outboundMessages: outboundRows
@@ -176,6 +200,7 @@ async function fetchPlanGraph(client, whereClause, params) {
     ? await client.query("select * from plan_vendor_service_areas where vendor_id = any($1::text[]) order by sort_order asc", [vendorIds])
     : { rows: [] };
   const suggestionResult = await client.query("select * from plan_suggestions where plan_id = any($1::text[]) order by sort_order asc", [planIds]);
+  const vendorCategoryResult = await client.query("select * from plan_vendor_categories where plan_id = any($1::text[]) order by sort_order asc", [planIds]);
   const outboundResult = await client.query("select * from plan_outbound_messages where plan_id = any($1::text[]) order by created_at asc", [planIds]);
   const inboundResult = await client.query("select * from plan_inbound_messages where plan_id = any($1::text[]) order by received_at asc", [planIds]);
 
@@ -183,6 +208,7 @@ async function fetchPlanGraph(client, whereClause, params) {
     mapPlanRow(
       planRow,
       suggestionResult.rows.filter((row) => row.plan_id === planRow.id),
+      vendorCategoryResult.rows.filter((row) => row.plan_id === planRow.id),
       vendorResult.rows.filter((row) => row.plan_id === planRow.id),
       serviceAreaResult.rows,
       outboundResult.rows.filter((row) => row.plan_id === planRow.id),
@@ -256,6 +282,7 @@ export async function savePlan(plan) {
     );
 
     await client.query("delete from plan_suggestions where plan_id = $1", [plan.id]);
+    await client.query("delete from plan_vendor_categories where plan_id = $1", [plan.id]);
     await client.query("delete from plan_outbound_messages where plan_id = $1", [plan.id]);
     await client.query("delete from plan_inbound_messages where plan_id = $1", [plan.id]);
     await client.query("delete from plan_vendors where plan_id = $1", [plan.id]);
@@ -264,6 +291,23 @@ export async function savePlan(plan) {
       await client.query(
         "insert into plan_suggestions (plan_id, sort_order, value) values ($1, $2, $3)",
         [plan.id, index, suggestion]
+      );
+    }
+
+    for (const [index, category] of (plan.vendorCategories || []).entries()) {
+      await client.query(
+        `
+          insert into plan_vendor_categories (plan_id, sort_order, category_key, label, description, is_selected)
+          values ($1, $2, $3, $4, $5, $6)
+        `,
+        [
+          plan.id,
+          index,
+          category.key || "",
+          category.label || "",
+          category.description || "",
+          Boolean(category.selected)
+        ]
       );
     }
 

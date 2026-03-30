@@ -19,6 +19,10 @@ function normalizeEmail(value) {
   return normalizeText(value).toLowerCase();
 }
 
+function normalizeCategoryKey(value) {
+  return normalizeText(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
 function buildOwnerSummary(user) {
   return user
     ? {
@@ -237,6 +241,32 @@ function generateFallbackIdeas(type, theme) {
   return ideas[type] || [`Curated celebration${suffix}`, `Modern social gathering${suffix}`, `Destination-inspired event${suffix}`];
 }
 
+function defaultVendorCategoriesForEvent(event) {
+  const categories = ["venue", "planner", "catering"];
+
+  if (event.guestCount >= 60) {
+    categories.push("photography");
+  }
+
+  if (["birthday", "baby-shower", "graduation", "custom-event"].includes(event.type)) {
+    categories.push("activity");
+  }
+
+  if (normalizeText(event.theme)) {
+    categories.push("decor");
+  }
+
+  return [...new Set(categories)];
+}
+
+function humanizeCategoryLabel(categoryKey) {
+  return normalizeCategoryKey(categoryKey)
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function collectMissingFields(payload) {
   return requiredFields.filter((field) => normalizeText(payload[field]).length === 0);
 }
@@ -319,32 +349,43 @@ function buildFallbackEvent(payload) {
   };
 }
 
-function buildFallbackShortlist(event) {
-  const strictMatches = vendorCatalog.filter((vendor) => vendorMatches(vendor, event));
-  const relaxedMatches =
-    strictMatches.length > 0
-      ? strictMatches
-      : vendorCatalog.filter((vendor) => {
-          const eventTypeMatch = vendor.eventTypes.includes(event.type) || event.type === "custom-event";
-          const capacityMatch = vendor.capacity >= event.guestCount;
-          return eventTypeMatch && capacityMatch;
-        });
-
-  return relaxedMatches
-    .map((vendor) => ({
-      ...vendor,
-      score: scoreVendor(vendor, event),
-      status: "available",
-      estimatedQuote: vendor.category === "catering" ? vendor.basePrice * event.guestCount : vendor.basePrice
-    }))
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 3);
+function buildFallbackVendorCategories(event) {
+  return defaultVendorCategoriesForEvent(event).map((categoryKey) => ({
+    key: categoryKey,
+    label: humanizeCategoryLabel(categoryKey),
+    description: `Recommended ${humanizeCategoryLabel(categoryKey).toLowerCase()} support for this event.`,
+    selected: true
+  }));
 }
 
-function buildShortlistFromCatalog(event, replyTo) {
+function buildFallbackShortlist(event, vendorCategories) {
+  return vendorCategories.flatMap((vendorCategory) => {
+    const strictMatches = vendorCatalog.filter((vendor) => vendor.category === vendorCategory.key && vendorMatches(vendor, event));
+    const relaxedMatches =
+      strictMatches.length > 0
+        ? strictMatches
+        : vendorCatalog.filter((vendor) => {
+            const eventTypeMatch = vendor.eventTypes.includes(event.type) || event.type === "custom-event";
+            const capacityMatch = vendor.capacity >= event.guestCount;
+            return vendor.category === vendorCategory.key && eventTypeMatch && capacityMatch;
+          });
+
+    return relaxedMatches
+      .map((vendor) => ({
+        ...vendor,
+        score: scoreVendor(vendor, event),
+        status: "available",
+        estimatedQuote: vendor.category === "catering" ? vendor.basePrice * event.guestCount : vendor.basePrice
+      }))
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 5);
+  });
+}
+
+function buildShortlistFromCatalog(event, vendorCategories, replyTo) {
   const testingInbox = resolveTestingVendorEmail();
 
-  return buildFallbackShortlist(event).map((vendor, index) => ({
+  return buildFallbackShortlist(event, vendorCategories).map((vendor, index) => ({
     id: vendor.id,
     rank: index + 1,
     name: vendor.name,
@@ -395,15 +436,63 @@ function coerceEvent(payload, eventData = {}) {
   };
 }
 
-function normalizeShortlist(shortlist, event, replyTo) {
-  const testingInbox = resolveTestingVendorEmail();
+function normalizeVendorCategories(vendorCategories, shortlist, selectedCategoryKeys = []) {
+  const selectedSet = new Set(selectedCategoryKeys.map(normalizeCategoryKey));
+  const inputCategories = Array.isArray(vendorCategories) ? vendorCategories : [];
+  const derivedCategories = Array.from(
+    new Set(
+      shortlist
+        .map((vendor) => normalizeCategoryKey(vendor.category))
+        .filter(Boolean)
+    )
+  );
+  const combined = [
+    ...inputCategories.map((category) => ({
+      key: normalizeCategoryKey(category.key || category.label),
+      label: normalizeText(category.label) || humanizeCategoryLabel(category.key || category.label),
+      description: normalizeText(category.description),
+      selected: selectedSet.size > 0 ? selectedSet.has(normalizeCategoryKey(category.key || category.label)) : true
+    })),
+    ...derivedCategories
+      .filter((categoryKey) => !inputCategories.some((item) => normalizeCategoryKey(item.key || item.label) === categoryKey))
+      .map((categoryKey) => ({
+        key: categoryKey,
+        label: humanizeCategoryLabel(categoryKey),
+        description: `Recommended ${humanizeCategoryLabel(categoryKey).toLowerCase()} support for this event.`,
+        selected: selectedSet.size > 0 ? selectedSet.has(categoryKey) : true
+      }))
+  ].filter((category) => category.key);
 
-  return shortlist.slice(0, 3).map((vendor, index) => {
+  return combined.length > 0 ? combined : derivedCategories.map((categoryKey) => ({
+    key: categoryKey,
+    label: humanizeCategoryLabel(categoryKey),
+    description: `Recommended ${humanizeCategoryLabel(categoryKey).toLowerCase()} support for this event.`,
+    selected: true
+  }));
+}
+
+function normalizeShortlist(shortlist, event, vendorCategories, replyTo) {
+  const testingInbox = resolveTestingVendorEmail();
+  const allowedCategoryKeys = new Set(vendorCategories.map((category) => category.key));
+  const countsByCategory = new Map();
+
+  return shortlist
+    .filter((vendor) => allowedCategoryKeys.size === 0 || allowedCategoryKeys.has(normalizeCategoryKey(vendor.category)))
+    .filter((vendor) => {
+      const categoryKey = normalizeCategoryKey(vendor.category);
+      const currentCount = countsByCategory.get(categoryKey) || 0;
+      if (currentCount >= 5) {
+        return false;
+      }
+      countsByCategory.set(categoryKey, currentCount + 1);
+      return true;
+    })
+    .map((vendor, index) => {
     const normalizedVendor = {
       id: createId("vendor"),
       rank: index + 1,
       name: normalizeText(vendor.name) || `Option ${index + 1}`,
-      category: normalizeText(vendor.category) || "vendor",
+      category: normalizeCategoryKey(vendor.category) || "vendor",
       rating: Number(vendor.rating) || 4.5,
       score: Math.max(1, Math.round(Number(vendor.score) || 78)),
       estimatedQuote: Math.max(500, Math.round(Number(vendor.estimatedQuote) || event.budget / 3)),
@@ -499,20 +588,27 @@ async function buildPlanDocument(payload, user, existingPlan = null) {
   const planId = existingPlan?.id || createId("plan");
   const replyTo = existingPlan?.communication?.replyTo || buildUserReplyAddress({ username: user?.username, planId }) || buildPlanReplyAddress(planId);
   let event;
+  let vendorCategories;
   let shortlist;
+  const selectedCategoryKeys = Array.isArray(payload.selectedVendorCategories)
+    ? payload.selectedVendorCategories
+    : (existingPlan?.vendorCategories || []).filter((item) => item.selected).map((item) => item.key);
 
   if (isAiConfigured()) {
     try {
       const aiResult = await generatePlanWithAi(payload);
       event = coerceEvent(payload, aiResult.event);
-      shortlist = normalizeShortlist(Array.isArray(aiResult.shortlist) ? aiResult.shortlist : [], event, replyTo);
+      vendorCategories = normalizeVendorCategories(aiResult.vendorCategories, Array.isArray(aiResult.shortlist) ? aiResult.shortlist : [], selectedCategoryKeys);
+      shortlist = normalizeShortlist(Array.isArray(aiResult.shortlist) ? aiResult.shortlist : [], event, vendorCategories, replyTo);
     } catch {
       event = buildFallbackEvent(payload);
-      shortlist = buildShortlistFromCatalog(event, replyTo);
+      vendorCategories = normalizeVendorCategories(buildFallbackVendorCategories(event), buildFallbackShortlist(event, buildFallbackVendorCategories(event)), selectedCategoryKeys);
+      shortlist = buildShortlistFromCatalog(event, vendorCategories, replyTo);
     }
   } else {
     event = buildFallbackEvent(payload);
-    shortlist = buildShortlistFromCatalog(event, replyTo);
+    vendorCategories = normalizeVendorCategories(buildFallbackVendorCategories(event), buildFallbackShortlist(event, buildFallbackVendorCategories(event)), selectedCategoryKeys);
+    shortlist = buildShortlistFromCatalog(event, vendorCategories, replyTo);
   }
 
   if (shortlist.length === 0) {
@@ -520,7 +616,8 @@ async function buildPlanDocument(payload, user, existingPlan = null) {
       event = buildFallbackEvent(payload);
     }
 
-    shortlist = buildShortlistFromCatalog(event, replyTo);
+    vendorCategories = vendorCategories || normalizeVendorCategories(buildFallbackVendorCategories(event), buildFallbackShortlist(event, buildFallbackVendorCategories(event)), selectedCategoryKeys);
+    shortlist = buildShortlistFromCatalog(event, vendorCategories, replyTo);
   }
 
   const communication = {
@@ -538,15 +635,34 @@ async function buildPlanDocument(payload, user, existingPlan = null) {
     isPaused: Boolean(existingPlan?.isPaused),
     owner: buildOwnerSummary(user),
     event,
+    vendorCategories,
     communication,
     automation: {
-      inquiryEmailsDrafted: preservedShortlist.length,
+      inquiryEmailsDrafted: preservedShortlist.filter((vendor) =>
+        vendorCategories.some((category) => category.selected && category.key === normalizeCategoryKey(vendor.category))
+      ).length,
       inquiryEmailsSent: 0,
       vendorRepliesReceived: 0
     },
     shortlist: preservedShortlist,
     finalSelection: null
   };
+}
+
+function sameSelectedCategories(payload, existingPlan) {
+  const nextSelected = (Array.isArray(payload.selectedVendorCategories)
+    ? payload.selectedVendorCategories
+    : (existingPlan?.vendorCategories || []).filter((item) => item.selected).map((item) => item.key))
+    .map(normalizeCategoryKey)
+    .sort()
+    .join("|");
+  const existingSelected = (existingPlan?.vendorCategories || [])
+    .filter((item) => item.selected)
+    .map((item) => normalizeCategoryKey(item.key))
+    .sort()
+    .join("|");
+
+  return nextSelected === existingSelected;
 }
 
 function sameNormalizedValue(left, right) {
@@ -586,7 +702,7 @@ export async function updatePlan(planId, payload, user) {
     return null;
   }
 
-  if (isEquivalentEventInput(payload, existingPlan)) {
+  if (isEquivalentEventInput(payload, existingPlan) && sameSelectedCategories(payload, existingPlan)) {
     return refreshPlanDrafts(existingPlan);
   }
 
@@ -629,8 +745,15 @@ export async function sendPlanInquiries(planId, userId) {
 
   const outboundMessages = [...plan.communication.outboundMessages];
   const updatedShortlist = [];
+  const selectedCategoryKeys = new Set((plan.vendorCategories || []).filter((category) => category.selected).map((category) => category.key));
+  const hasCategoryConfig = Array.isArray(plan.vendorCategories) && plan.vendorCategories.length > 0;
 
   for (const vendor of plan.shortlist) {
+    if (hasCategoryConfig && !selectedCategoryKeys.has(normalizeCategoryKey(vendor.category))) {
+      updatedShortlist.push(vendor);
+      continue;
+    }
+
     const alreadyContacted = outboundMessages.some((message) => message.type === "inquiry" && message.vendorId === vendor.id);
 
     if (alreadyContacted) {

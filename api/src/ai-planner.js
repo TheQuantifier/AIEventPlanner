@@ -223,6 +223,13 @@ Return only valid JSON with this shape:
     "suggestions": ["string"],
     "plannerSummary": "string"
   },
+  "vendorCategories": [
+    {
+      "key": "string",
+      "label": "string",
+      "description": "string"
+    }
+  ],
   "shortlist": [
     {
       "name": "string",
@@ -242,7 +249,8 @@ Rules:
 - Search the web for real vendor or location options if needed.
 - Use the theme to influence style and vendor fit.
 - Prefer options that fit the budget, location, and dates.
-- Return exactly 3 shortlist items when possible.
+- Return 3 to 5 vendor categories when possible.
+- For each vendor category, return up to 5 vendor options when possible.
 - If exact pricing is unavailable, estimate conservatively.
 - Keep summaries brief and user-facing.
 - If location is flexible, infer the best likely area from the request and note that in plannerSummary.

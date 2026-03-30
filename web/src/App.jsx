@@ -222,6 +222,31 @@ function buildPlanSummary(plan) {
   ];
 }
 
+function getSelectedVendorCategories(plan) {
+  const configured = (plan?.vendorCategories || []).filter((category) => category.selected);
+  if (configured.length > 0) {
+    return configured;
+  }
+
+  const derivedKeys = Array.from(new Set((plan?.shortlist || []).map((vendor) => vendor.category).filter(Boolean)));
+  return derivedKeys.map((key) => ({
+    key,
+    label: toTitleCase(String(key).replace(/-/g, " ")),
+    description: "",
+    selected: true
+  }));
+}
+
+function groupVendorsByCategory(plan) {
+  const categories = getSelectedVendorCategories(plan);
+  const vendors = Array.isArray(plan?.shortlist) ? plan.shortlist : [];
+
+  return categories.map((category) => ({
+    ...category,
+    vendors: vendors.filter((vendor) => vendor.category === category.key)
+  }));
+}
+
 function formatThemeLine(event) {
   return event?.theme ? `Style / theme: ${event.theme}` : "";
 }
@@ -437,7 +462,7 @@ function IntakeSection({ intake }) {
   );
 }
 
-function DirectionSection({ plan, intake, onShowVendors }) {
+function DirectionSection({ plan, intake, onShowVendors, onToggleVendorCategory, categorySaving }) {
   if (!plan) return null;
 
   return (
@@ -464,6 +489,27 @@ function DirectionSection({ plan, intake, onShowVendors }) {
           {buildPlanSummary(plan).map(([label, value]) => <p key={label}><strong>{label}:</strong> {value}</p>)}
           {plan.event.plannerSummary ? <p>{plan.event.plannerSummary}</p> : null}
         </div>
+        {Array.isArray(plan.vendorCategories) && plan.vendorCategories.length > 0 ? (
+          <div className="vendor-category-plan">
+            <h3>Suggested vendor types</h3>
+            <div className="vendor-category-list">
+              {plan.vendorCategories.map((category) => (
+                <label key={category.key} className="vendor-category-item">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(category.selected)}
+                    disabled={categorySaving}
+                    onChange={(event) => onToggleVendorCategory(category.key, event.target.checked)}
+                  />
+                  <span>
+                    <strong>{category.label}</strong>
+                    <small>{category.description}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {plan.event.suggestions?.length ? <div className="suggestions">{plan.event.suggestions.map((item) => <span key={item} className="chip">{item}</span>)}</div> : null}
         <div className="direction-notes">
           <div className="follow-up-item">Use the shared composer above to refine the event brief and save updates.</div>
@@ -480,7 +526,7 @@ function DirectionSection({ plan, intake, onShowVendors }) {
 
 function MatchesSection({ plan, onFinalizeVendor, onSendInquiries, sendingInquiries }) {
   if (!plan) return null;
-  const shortlist = Array.isArray(plan.shortlist) ? plan.shortlist : [];
+  const vendorGroups = groupVendorsByCategory(plan);
   const inquiries = plan.communication?.outboundMessages?.filter((message) => message.type === "inquiry") || [];
   const alreadySent = inquiries.length > 0;
 
@@ -493,36 +539,49 @@ function MatchesSection({ plan, onFinalizeVendor, onSendInquiries, sendingInquir
             {plan.isPaused ? "Event paused" : sendingInquiries ? "Sending inquiries..." : alreadySent ? "Outreach already handled" : "Start outreach"}
           </button>
         </div>
-        {shortlist.length === 0 ? (
+        {vendorGroups.length === 0 ? (
           <div className="follow-up-item">No recommended matches yet. Save the event direction to generate options.</div>
         ) : (
-          <div className="shortlist">
-            {shortlist.map((vendor) => (
-              <article key={vendor.id} className="vendor-card">
-                {(() => {
-                  const inquiryPreview = buildInquiryPreview(plan.event, vendor);
-                  return (
-                    <>
-                <div className="vendor-topline">
-                  <div><p className="eyebrow">Option {vendor.rank}</p><h3>{vendor.name}</h3></div>
-                  <div className="vendor-price-block"><strong>{currency(vendor.estimatedQuote)}</strong><span className={`status-pill status-${vendor.status}`}>{vendor.status}</span></div>
+          <div className="vendor-groups">
+            {vendorGroups.map((group) => (
+              <section key={group.key} className="vendor-group-card">
+                <div className="vendor-group-header">
+                  <div>
+                    <p className="eyebrow">{group.label}</p>
+                    <h3>{group.description || `Top ${group.label.toLowerCase()} options`}</h3>
+                  </div>
+                  <span className="topbar-badge">{group.vendors.length} option{group.vendors.length === 1 ? "" : "s"}</span>
                 </div>
-                <div className="vendor-meta"><span>{vendor.category}</span><span>{vendor.serviceArea.join(", ")}</span><span>{vendor.rating}/5</span><span>Score {vendor.score}</span></div>
-                <p>{vendor.summary}</p>
-                <p className="fine-print">Primary contact: {vendor.email}</p>
-                <details className="email-preview">
-                  <summary>Preview inquiry email</summary>
-                  <p className="fine-print">To: {inquiryPreview.to}</p>
-                  <p className="fine-print">Subject: {inquiryPreview.subject}</p>
-                  <pre>{inquiryPreview.body}</pre>
-                </details>
-                <button type="button" disabled={plan.finalSelection?.vendorId === vendor.id || plan.isPaused} onClick={() => onFinalizeVendor(vendor.id)}>
-                  {plan.finalSelection?.vendorId === vendor.id ? "Chosen" : "Choose this option"}
-                </button>
-                    </>
-                  );
-                })()}
-              </article>
+                <div className="vendor-group-scroll">
+                  {group.vendors.length === 0 ? (
+                    <div className="follow-up-item">No vendors found for this category yet.</div>
+                  ) : (
+                    group.vendors.map((vendor) => {
+                      const inquiryPreview = buildInquiryPreview(plan.event, vendor);
+                      return (
+                        <article key={vendor.id} className="vendor-card">
+                          <div className="vendor-topline">
+                            <div><p className="eyebrow">Option {vendor.rank}</p><h3>{vendor.name}</h3></div>
+                            <div className="vendor-price-block"><strong>{currency(vendor.estimatedQuote)}</strong><span className={`status-pill status-${vendor.status}`}>{vendor.status}</span></div>
+                          </div>
+                          <div className="vendor-meta"><span>{vendor.category}</span><span>{vendor.serviceArea.join(", ")}</span><span>{vendor.rating}/5</span><span>Score {vendor.score}</span></div>
+                          <p>{vendor.summary}</p>
+                          <p className="fine-print">Primary contact: {vendor.email}</p>
+                          <details className="email-preview">
+                            <summary>Preview inquiry email</summary>
+                            <p className="fine-print">To: {inquiryPreview.to}</p>
+                            <p className="fine-print">Subject: {inquiryPreview.subject}</p>
+                            <pre>{inquiryPreview.body}</pre>
+                          </details>
+                          <button type="button" disabled={plan.finalSelection?.vendorId === vendor.id || plan.isPaused} onClick={() => onFinalizeVendor(vendor.id)}>
+                            {plan.finalSelection?.vendorId === vendor.id ? "Chosen" : "Choose this option"}
+                          </button>
+                        </article>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
             ))}
           </div>
         )}
@@ -702,6 +761,7 @@ export default function App() {
   const [analyzing, setAnalyzing] = useState(false);
   const [savingPlan, setSavingPlan] = useState(false);
   const [sendingInquiries, setSendingInquiries] = useState(false);
+  const [categorySaving, setCategorySaving] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [currentPage, setCurrentPage] = useState("home");
   const [isPageTransitioning, setIsPageTransitioning] = useState(false);
@@ -1190,6 +1250,37 @@ export default function App() {
     }
   }
 
+  async function handleToggleVendorCategory(categoryKey, selected) {
+    if (!currentPlan) return;
+
+    const nextCategories = (currentPlan.vendorCategories || []).map((category) =>
+      category.key === categoryKey ? { ...category, selected } : category
+    );
+    const selectedVendorCategories = nextCategories.filter((category) => category.selected).map((category) => category.key);
+
+    setCategorySaving(true);
+    try {
+      const updatedPlan = await requestJson(
+        `${apiBaseUrl}/api/plans/${currentPlan.id}`,
+        {
+          method: "PUT",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            ...formData,
+            selectedVendorCategories
+          })
+        },
+        "Failed to update vendor categories"
+      );
+      setCurrentPlan(updatedPlan);
+      upsertPlan(updatedPlan);
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      setCategorySaving(false);
+    }
+  }
+
   async function handleStartOutreach() {
     setActiveStep(2);
     await handleSendInquiries();
@@ -1373,6 +1464,8 @@ export default function App() {
                   plan={currentPlan}
                   intake={intake}
                   onShowVendors={handleShowVendors}
+                  onToggleVendorCategory={handleToggleVendorCategory}
+                  categorySaving={categorySaving}
                 />
               ) : (
                 <section className="panel">
