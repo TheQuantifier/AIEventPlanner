@@ -20,6 +20,21 @@ const emptyAuthForm = {
   token: ""
 };
 
+const emptyProfileForm = {
+  fullName: "",
+  email: "",
+  organization: ""
+};
+
+const emptyPasswordSettingsForm = {
+  newPassword: "",
+  code: ""
+};
+
+const emptyDeleteSettingsForm = {
+  code: ""
+};
+
 function currency(value) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -35,6 +50,40 @@ function formatDate(value) {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
+}
+
+function formatBudgetInput(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? `$${numeric.toLocaleString()}` : "";
+}
+
+function getUserInitials(user) {
+  const fullNameParts = String(user?.fullName || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (fullNameParts.length >= 2) {
+    return `${fullNameParts[0][0] || ""}${fullNameParts[fullNameParts.length - 1][0] || ""}`.toUpperCase();
+  }
+
+  if (fullNameParts.length === 1 && fullNameParts[0]) {
+    return (fullNameParts[0][0] || "U").toUpperCase();
+  }
+
+  const fallbackParts = String(user?.username || user?.email || "")
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean);
+
+  if (fallbackParts.length >= 2) {
+    return `${fallbackParts[0][0] || ""}${fallbackParts[fallbackParts.length - 1][0] || ""}`.toUpperCase();
+  }
+
+  const fallback = String(user?.username || user?.email || "U")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 2);
+
+  return fallback.toUpperCase() || "U";
 }
 
 async function requestJson(url, options = {}, fallbackMessage = "Request failed") {
@@ -143,7 +192,7 @@ function getEventDisplayName(plan) {
 function eventFormFromPlan(plan) {
   return {
     brief: plan.event?.brief || "",
-    budget: plan.event?.budgetLabel || String(plan.event?.budget || ""),
+    budget: formatBudgetInput(plan.event?.budget),
     location: plan.event?.location || "",
     dates: plan.event?.dateWindow || "",
     theme: plan.event?.theme || "",
@@ -166,7 +215,7 @@ function buildPlanSummary(plan) {
   return [
     ["Event", plan.event.type],
     ["Theme", plan.event.theme || "Open"],
-    ["Budget", plan.event.budgetLabel],
+    ["Budget", formatBudgetInput(plan.event.budget)],
     ["Where", plan.event.location],
     ["When", plan.event.dateWindow],
     ["Guests", plan.event.guestCount]
@@ -524,6 +573,119 @@ function CommunicationSection({ plan }) {
   );
 }
 
+function AccountPanel({
+  view,
+  user,
+  profileForm,
+  profileSaving,
+  profileMessage,
+  onProfileChange,
+  onProfileSave,
+  passwordForm,
+  passwordBusy,
+  passwordMessage,
+  onPasswordChange,
+  onPasswordRequest,
+  onPasswordConfirm,
+  deleteForm,
+  deleteBusy,
+  deleteMessage,
+  onDeleteChange,
+  onDeleteRequest,
+  onDeleteConfirm
+}) {
+  if (view === "profile") {
+    return (
+      <section className="panel account-panel">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Profile</p>
+            <h2>General information</h2>
+          </div>
+        </div>
+        <form className="planner-form" onSubmit={onProfileSave}>
+          <div className="grid">
+            <label className="field">
+              <span>Name</span>
+              <input name="fullName" value={profileForm.fullName} onChange={onProfileChange} placeholder="John Hand" />
+            </label>
+            <label className="field">
+              <span>Email</span>
+              <input name="email" value={profileForm.email} onChange={onProfileChange} placeholder="you@example.com" />
+            </label>
+            <label className="field">
+              <span>Organization</span>
+              <input name="organization" value={profileForm.organization} onChange={onProfileChange} placeholder="Manus Web Works" />
+            </label>
+          </div>
+          {profileMessage ? <p className="fine-print">{profileMessage}</p> : null}
+          <div className="action-row">
+            <button type="submit" disabled={profileSaving}>
+              {profileSaving ? "Saving..." : "Save profile"}
+            </button>
+            <div className="topbar-badge">Username: {user.username}</div>
+          </div>
+        </form>
+      </section>
+    );
+  }
+
+  if (view === "settings") {
+    return (
+      <section className="panel account-panel">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Settings</p>
+            <h2>Account security</h2>
+          </div>
+        </div>
+        <div className="account-settings-grid">
+          <form className="planner-form account-card" onSubmit={onPasswordRequest}>
+            <h3>Change password</h3>
+            <p className="fine-print">We will email a temporary verification code to {user.email} before applying the new password.</p>
+            <label className="field">
+              <span>New password</span>
+              <input name="newPassword" type="password" value={passwordForm.newPassword} onChange={onPasswordChange} placeholder="12+ chars, upper, lower, number, symbol" />
+            </label>
+            <label className="field">
+              <span>Verification code</span>
+              <input name="code" value={passwordForm.code} onChange={onPasswordChange} placeholder="6-digit code" />
+            </label>
+            {passwordMessage ? <p className="fine-print">{passwordMessage}</p> : null}
+            <div className="action-row">
+              <button type="submit" disabled={passwordBusy || !passwordForm.newPassword.trim()}>
+                {passwordBusy ? "Sending..." : "Send code"}
+              </button>
+              <button type="button" className="secondary" disabled={passwordBusy || !passwordForm.code.trim()} onClick={onPasswordConfirm}>
+                Confirm password change
+              </button>
+            </div>
+          </form>
+          <form className="planner-form account-card" onSubmit={onDeleteRequest}>
+            <h3>Delete account</h3>
+            <p className="fine-print">This permanently removes your account, plans, replies, sessions, and verification records after email confirmation.</p>
+            <label className="field">
+              <span>Verification code</span>
+              <input name="code" value={deleteForm.code} onChange={onDeleteChange} placeholder="6-digit code" />
+            </label>
+            {deleteMessage ? <p className="fine-print">{deleteMessage}</p> : null}
+            <div className="action-row">
+              <button type="submit" className="secondary" disabled={deleteBusy}>
+                {deleteBusy ? "Sending..." : "Send delete code"}
+              </button>
+              <button type="button" className="secondary danger" disabled={deleteBusy || !deleteForm.code.trim()} onClick={onDeleteConfirm}>
+                Permanently delete account
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+    );
+  }
+
+  return null;
+}
+
 export default function App() {
   const [sessionToken, setSessionToken] = useState("");
   const [user, setUser] = useState(null);
@@ -543,6 +705,17 @@ export default function App() {
   const [activeStep, setActiveStep] = useState(0);
   const [currentPage, setCurrentPage] = useState("home");
   const [isPageTransitioning, setIsPageTransitioning] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState(emptyProfileForm);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState("");
+  const [passwordSettingsForm, setPasswordSettingsForm] = useState(emptyPasswordSettingsForm);
+  const [passwordSettingsBusy, setPasswordSettingsBusy] = useState(false);
+  const [passwordSettingsMessage, setPasswordSettingsMessage] = useState("");
+  const [deleteSettingsForm, setDeleteSettingsForm] = useState(emptyDeleteSettingsForm);
+  const [deleteSettingsBusy, setDeleteSettingsBusy] = useState(false);
+  const [deleteSettingsMessage, setDeleteSettingsMessage] = useState("");
+  const accountMenuRef = useRef(null);
 
   useEffect(() => {
     const resetToken = new URLSearchParams(window.location.search).get("resetToken");
@@ -587,6 +760,46 @@ export default function App() {
       loadDashboardPlans();
     }
   }, [user]);
+
+  useEffect(() => {
+    setProfileForm({
+      fullName: user?.fullName || "",
+      email: user?.email || "",
+      organization: user?.organization || ""
+    });
+  }, [user?.fullName, user?.email, user?.organization]);
+
+  useEffect(() => {
+    function handleDocumentClick(event) {
+      if (!accountMenuRef.current?.contains(event.target)) {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleDocumentClick);
+    return () => document.removeEventListener("mousedown", handleDocumentClick);
+  }, []);
+
+  function resetSessionState() {
+    window.localStorage.removeItem(authStorageKey);
+    setSessionToken("");
+    setUser(null);
+    setDashboardPlans([]);
+    setCurrentPlan(null);
+    setEditingPlanId(null);
+    setIntake(null);
+    setFormData(emptyForm);
+    setAuthForm(emptyAuthForm);
+    setAuthMessage("");
+    setCurrentPage("home");
+    setActiveStep(0);
+    setAccountMenuOpen(false);
+    setProfileForm(emptyProfileForm);
+    setPasswordSettingsForm(emptyPasswordSettingsForm);
+    setPasswordSettingsMessage("");
+    setDeleteSettingsForm(emptyDeleteSettingsForm);
+    setDeleteSettingsMessage("");
+  }
 
   function authHeaders(extra = {}) {
     return {
@@ -724,19 +937,148 @@ export default function App() {
     } catch (error) {
       console.error(error);
     } finally {
-      window.localStorage.removeItem(authStorageKey);
-      setSessionToken("");
-      setUser(null);
-      setDashboardPlans([]);
-      setCurrentPlan(null);
-      setEditingPlanId(null);
-      setIntake(null);
-      setFormData(emptyForm);
-      setAuthForm(emptyAuthForm);
-      setAuthMessage("");
-      setCurrentPage("home");
-      setActiveStep(0);
+      resetSessionState();
     }
+  }
+
+  function handleProfileFieldChange(event) {
+    const { name, value } = event.target;
+    setProfileForm((current) => ({ ...current, [name]: value }));
+    setProfileMessage("");
+  }
+
+  function handlePasswordSettingsChange(event) {
+    const { name, value } = event.target;
+    setPasswordSettingsForm((current) => ({ ...current, [name]: value }));
+    setPasswordSettingsMessage("");
+  }
+
+  function handleDeleteSettingsChange(event) {
+    const { name, value } = event.target;
+    setDeleteSettingsForm((current) => ({ ...current, [name]: value }));
+    setDeleteSettingsMessage("");
+  }
+
+  async function handleProfileSave(event) {
+    event.preventDefault();
+    setProfileSaving(true);
+    setProfileMessage("");
+
+    try {
+      const payload = await requestJson(
+        `${apiBaseUrl}/api/account/profile`,
+        {
+          method: "PUT",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(profileForm)
+        },
+        "Failed to update profile"
+      );
+      setUser(payload.user);
+      setProfileMessage("Profile updated.");
+    } catch (error) {
+      setProfileMessage(error.message);
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  async function handlePasswordCodeRequest(event) {
+    event.preventDefault();
+    setPasswordSettingsBusy(true);
+    setPasswordSettingsMessage("");
+
+    try {
+      await requestJson(
+        `${apiBaseUrl}/api/account/change-password/request`,
+        {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ newPassword: passwordSettingsForm.newPassword })
+        },
+        "Failed to send password verification code"
+      );
+      setPasswordSettingsMessage(`Verification code sent to ${user.email}.`);
+    } catch (error) {
+      setPasswordSettingsMessage(error.message);
+    } finally {
+      setPasswordSettingsBusy(false);
+    }
+  }
+
+  async function handlePasswordChangeConfirm() {
+    setPasswordSettingsBusy(true);
+    setPasswordSettingsMessage("");
+
+    try {
+      await requestJson(
+        `${apiBaseUrl}/api/account/change-password/confirm`,
+        {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ code: passwordSettingsForm.code })
+        },
+        "Failed to change password"
+      );
+      alert("Password changed. Please sign in again.");
+      await handleLogout();
+    } catch (error) {
+      setPasswordSettingsMessage(error.message);
+      setPasswordSettingsBusy(false);
+    }
+  }
+
+  async function handleDeleteCodeRequest(event) {
+    event.preventDefault();
+    setDeleteSettingsBusy(true);
+    setDeleteSettingsMessage("");
+
+    try {
+      await requestJson(
+        `${apiBaseUrl}/api/account/delete/request`,
+        {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" })
+        },
+        "Failed to send delete verification code"
+      );
+      setDeleteSettingsMessage(`Verification code sent to ${user.email}.`);
+    } catch (error) {
+      setDeleteSettingsMessage(error.message);
+    } finally {
+      setDeleteSettingsBusy(false);
+    }
+  }
+
+  async function handleDeleteAccountConfirm() {
+    const confirmed = window.confirm("Delete your account and all related data permanently?");
+    if (!confirmed) {
+      return;
+    }
+
+    setDeleteSettingsBusy(true);
+    setDeleteSettingsMessage("");
+
+    try {
+      await requestJson(
+        `${apiBaseUrl}/api/account/delete/confirm`,
+        {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ code: deleteSettingsForm.code })
+        },
+        "Failed to delete account"
+      );
+      resetSessionState();
+    } catch (error) {
+      setDeleteSettingsMessage(error.message);
+      setDeleteSettingsBusy(false);
+    }
+  }
+
+  function goToAccountPage(page) {
+    setCurrentPage(page);
+    setAccountMenuOpen(false);
   }
 
   async function handleAnalyze(event, nextPage = currentPage) {
@@ -922,9 +1264,23 @@ export default function App() {
   return (
     <main className="shell">
       <section className="topbar">
+        {(currentPage === "profile" || currentPage === "settings") ? (
+          <button type="button" className="secondary" onClick={() => setCurrentPage("home")}>
+            Return to dashboard
+          </button>
+        ) : null}
         <div>
           <p className="eyebrow">AI Event Planner</p>
-          <h1>{currentPage === "home" ? "Operations dashboard" : "Event workspace"}</h1>
+          <h1>
+            {
+              {
+                home: "Operations dashboard",
+                workspace: "Event workspace",
+                profile: "Profile",
+                settings: "Settings"
+              }[currentPage] || "AI Event Planner"
+            }
+          </h1>
         </div>
         <div className="topbar-actions">
           {currentPage === "workspace" ? (
@@ -932,11 +1288,34 @@ export default function App() {
               Back to dashboard
             </button>
           ) : null}
-          <div className="topbar-badge">Signed in as {user.username}</div>
-          <button type="button" className="secondary" onClick={handleLogout}>
-            Sign out
-          </button>
           <div className="topbar-badge">Workflow orchestration for live event plans</div>
+          <div className="account-menu-wrap" ref={accountMenuRef}>
+            <button
+              type="button"
+              className="account-avatar-button"
+              onClick={() => setAccountMenuOpen((open) => !open)}
+              aria-label="Open account menu"
+            >
+              <span className="account-avatar">{getUserInitials(user)}</span>
+            </button>
+            {accountMenuOpen ? (
+              <div className="account-menu">
+                <div className="account-menu-header">
+                  <strong>{user.fullName || user.username}</strong>
+                  <span>{user.email}</span>
+                </div>
+                <button type="button" className="account-menu-item" onClick={() => goToAccountPage("profile")}>
+                  Profile
+                </button>
+                <button type="button" className="account-menu-item" onClick={() => goToAccountPage("settings")}>
+                  Settings
+                </button>
+                <button type="button" className="account-menu-item" onClick={() => { setAccountMenuOpen(false); handleLogout(); }}>
+                  Sign out
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </section>
 
@@ -955,7 +1334,7 @@ export default function App() {
             />
           </div>
         </div>
-      ) : (
+      ) : currentPage === "workspace" ? (
         <section className="carousel">
           <SharedComposer
             mode="workspace"
@@ -1041,6 +1420,30 @@ export default function App() {
               Next
             </button>
           </div>
+        </section>
+      ) : (
+        <section className="account-stage">
+          <AccountPanel
+            view={currentPage}
+            user={user}
+            profileForm={profileForm}
+            profileSaving={profileSaving}
+            profileMessage={profileMessage}
+            onProfileChange={handleProfileFieldChange}
+            onProfileSave={handleProfileSave}
+            passwordForm={passwordSettingsForm}
+            passwordBusy={passwordSettingsBusy}
+            passwordMessage={passwordSettingsMessage}
+            onPasswordChange={handlePasswordSettingsChange}
+            onPasswordRequest={handlePasswordCodeRequest}
+            onPasswordConfirm={handlePasswordChangeConfirm}
+            deleteForm={deleteSettingsForm}
+            deleteBusy={deleteSettingsBusy}
+            deleteMessage={deleteSettingsMessage}
+            onDeleteChange={handleDeleteSettingsChange}
+            onDeleteRequest={handleDeleteCodeRequest}
+            onDeleteConfirm={handleDeleteAccountConfirm}
+          />
         </section>
       )}
     </main>

@@ -16,6 +16,12 @@ function numberOrDefault(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function formatBudgetLabel(value) {
+  const numeric = Number(value);
+  const resolved = Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  return resolved > 0 ? `$${resolved.toLocaleString()}` : "";
+}
+
 function toIsoStringOrFallback(value, fallback = null) {
   if (!value) {
     return fallback;
@@ -70,7 +76,7 @@ function mapPlanRow(planRow, suggestions, vendorRows, serviceAreaRows, outboundR
       type: planRow.event_type || "",
       theme: planRow.event_theme || "",
       budget: numberOrDefault(planRow.event_budget),
-      budgetLabel: planRow.event_budget_label || "",
+      budgetLabel: formatBudgetLabel(planRow.event_budget),
       location: planRow.event_location || "",
       dateWindow: planRow.event_date_window || "",
       guestCount: Number(planRow.event_guest_count) || 0,

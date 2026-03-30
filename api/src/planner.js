@@ -190,6 +190,27 @@ function parseBudget(value) {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 10000;
 }
 
+function formatBudgetLabel(value) {
+  const numeric = Number(value);
+  const resolved = Number.isFinite(numeric) && numeric > 0 ? numeric : parseBudget(value);
+  return `$${resolved.toLocaleString()}`;
+}
+
+function normalizeBudgetLabel(label, budget) {
+  const normalizedLabel = normalizeText(label);
+
+  if (!normalizedLabel) {
+    return formatBudgetLabel(budget);
+  }
+
+  const parsedFromLabel = Number(normalizedLabel.replace(/[^0-9.]/g, ""));
+  if (Number.isFinite(parsedFromLabel) && parsedFromLabel > 0) {
+    return formatBudgetLabel(parsedFromLabel);
+  }
+
+  return formatBudgetLabel(budget);
+}
+
 function deriveDateWindow(dates) {
   const text = normalizeText(dates);
   return text || "Flexible";
@@ -287,7 +308,7 @@ function buildFallbackEvent(payload) {
     type,
     theme,
     budget,
-    budgetLabel: `$${budget.toLocaleString()}`,
+    budgetLabel: formatBudgetLabel(budget),
     location,
     dateWindow,
     guestCount,
@@ -352,8 +373,8 @@ function resolveTestingVendorEmail() {
 }
 
 function coerceEvent(payload, eventData = {}) {
-  const budget = Number(eventData.budget);
   const guestCount = Number(eventData.guestCount);
+  const resolvedBudget = parseBudget(payload.budget);
 
   return {
     brief: normalizeText(eventData.brief || payload.brief),
@@ -364,8 +385,8 @@ function coerceEvent(payload, eventData = {}) {
     }),
     type: normalizeText(eventData.type || inferEventType(payload.brief)),
     theme: normalizeText(eventData.theme || payload.theme),
-    budget: Number.isFinite(budget) && budget > 0 ? budget : parseBudget(payload.budget),
-    budgetLabel: normalizeText(eventData.budgetLabel) || `$${(Number.isFinite(budget) && budget > 0 ? budget : parseBudget(payload.budget)).toLocaleString()}`,
+    budget: resolvedBudget,
+    budgetLabel: formatBudgetLabel(payload.budget),
     location: normalizeText(eventData.location || payload.location) || "Flexible",
     dateWindow: normalizeText(eventData.dateWindow || payload.dates) || "Flexible",
     guestCount: Number.isFinite(guestCount) && guestCount > 0 ? guestCount : deriveGuestCount(payload.guestCount),

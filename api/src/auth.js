@@ -5,6 +5,7 @@ import { sendEmail } from "./email-client.js";
 
 const SESSION_TTL_DAYS = 30;
 const RESET_TTL_MINUTES = 30;
+const ACCOUNT_ACTION_CODE_TTL_MINUTES = 15;
 const PASSWORD_MIN_LENGTH = 12;
 
 function createId(prefix) {
@@ -20,6 +21,10 @@ function normalizeEmail(value) {
 }
 
 function normalizeFullName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function normalizeOrganization(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
 
@@ -111,6 +116,7 @@ function sanitizeUser(row) {
     username: row.username,
     email: row.email || "",
     fullName: row.full_name || "",
+    organization: row.organization || "",
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at
   };
 }
@@ -123,6 +129,7 @@ async function loadUserByIdentifier(identifier) {
   const result = await query(
     `
       select id, username, email, full_name, password_hash, created_at
+           , organization
       from app_users
       where username = $1
          or lower(email) = $2
@@ -178,6 +185,82 @@ async function sendPasswordResetEmail({ email, fullName, token }) {
   });
 }
 
+function createVerificationCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+async function sendAccountActionCodeEmail({ email, fullName, purpose, code }) {
+  const greeting = fullName || "there";
+  const subject = purpose === "delete-account"
+    ? "Confirm your AI Event Planner account deletion"
+    : "Confirm your AI Event Planner password change";
+  const actionLine = purpose === "delete-account"
+    ? "We received a request to permanently delete your account."
+    : "We received a request to change your password.";
+
+  await sendEmail({
+    to: email,
+    subject,
+    text: [
+      `Hello ${greeting},`,
+      "",
+      actionLine,
+      `Use this verification code to continue: ${code}`,
+      "",
+      `This code expires in ${ACCOUNT_ACTION_CODE_TTL_MINUTES} minutes.`,
+      "If you did not request this change, you can ignore this email."
+    ].join("\n")
+  });
+}
+
+async function createAccountActionCode({ userId, purpose, payload = {} }) {
+  const code = createVerificationCode();
+  const recordId = createId("acct-code");
+  const expiresAt = new Date(Date.now() + ACCOUNT_ACTION_CODE_TTL_MINUTES * 60 * 1000).toISOString();
+
+  await query("delete from app_account_action_codes where user_id = $1 and purpose = $2 and used_at is null", [userId, purpose]);
+  await query(
+    `
+      insert into app_account_action_codes (id, user_id, purpose, code_hash, payload, expires_at)
+      values ($1, $2, $3, $4, $5::jsonb, $6::timestamptz)
+    `,
+    [recordId, userId, purpose, hashToken(code), JSON.stringify(payload), expiresAt]
+  );
+
+  return code;
+}
+
+async function consumeAccountActionCode({ userId, purpose, code }) {
+  const normalizedCode = String(code || "").trim();
+
+  if (!normalizedCode) {
+    return null;
+  }
+
+  const result = await query(
+    `
+      select id, payload
+      from app_account_action_codes
+      where user_id = $1
+        and purpose = $2
+        and code_hash = $3
+        and used_at is null
+        and expires_at > now()
+      order by created_at desc
+      limit 1
+    `,
+    [userId, purpose, hashToken(normalizedCode)]
+  );
+  const record = result.rows[0];
+
+  if (!record) {
+    return null;
+  }
+
+  await query("update app_account_action_codes set used_at = now() where id = $1", [record.id]);
+  return record.payload || {};
+}
+
 export async function registerUser({ email, fullName, password }) {
   const normalizedEmail = normalizeEmail(email);
   const normalizedFullName = normalizeFullName(fullName);
@@ -215,7 +298,7 @@ export async function registerUser({ email, fullName, password }) {
     `
       insert into app_users (id, username, email, full_name, password_hash)
       values ($1, $2, $3, $4, $5)
-      returning id, username, email, full_name, created_at
+      returning id, username, email, full_name, organization, created_at
     `,
     [userId, username, normalizedEmail, normalizedFullName, passwordHash]
   );
@@ -246,6 +329,7 @@ export async function getUserFromToken(token) {
   const result = await query(
     `
       select u.id, u.username, u.email, u.full_name, u.created_at
+           , u.organization
       from app_sessions s
       join app_users u on u.id = s.user_id
       where s.token_hash = $1
@@ -279,6 +363,7 @@ export async function requestPasswordReset({ email }) {
   const result = await query(
     `
       select id, username, email, full_name, created_at
+           , organization
       from app_users
       where lower(email) = $1
       limit 1
@@ -354,6 +439,169 @@ export async function resetPassword({ token, password }) {
   await query("update app_users set password_hash = $1, updated_at = now() where id = $2", [hashPassword(password), resetRecord.user_id]);
   await query("update app_password_resets set used_at = now() where id = $1", [resetRecord.id]);
   await query("delete from app_sessions where user_id = $1", [resetRecord.user_id]);
+
+  return {
+    ok: true
+  };
+}
+
+export async function updateUserProfile(userId, { fullName, email, organization }) {
+  const normalizedFullName = normalizeFullName(fullName);
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedOrganization = normalizeOrganization(organization);
+
+  if (!normalizedFullName || normalizedFullName.length < 3) {
+    return {
+      error: "Full name must be at least 3 characters"
+    };
+  }
+
+  if (!validateEmail(normalizedEmail)) {
+    return {
+      error: "Enter a valid email address"
+    };
+  }
+
+  const existing = await query("select id from app_users where lower(email) = $1 and id <> $2 limit 1", [normalizedEmail, userId]);
+  if (existing.rows[0]) {
+    return {
+      error: "That email address is already in use"
+    };
+  }
+
+  const result = await query(
+    `
+      update app_users
+      set email = $1,
+          full_name = $2,
+          organization = $3,
+          updated_at = now()
+      where id = $4
+      returning id, username, email, full_name, organization, created_at
+    `,
+    [normalizedEmail, normalizedFullName, normalizedOrganization, userId]
+  );
+
+  return {
+    user: sanitizeUser(result.rows[0])
+  };
+}
+
+export async function requestPasswordChangeVerification(userId, { newPassword }) {
+  const passwordError = validatePassword(newPassword);
+  if (passwordError) {
+    return {
+      error: passwordError
+    };
+  }
+
+  const result = await query(
+    `
+      select id, email, full_name
+      from app_users
+      where id = $1
+      limit 1
+    `,
+    [userId]
+  );
+  const user = result.rows[0];
+
+  if (!user?.email) {
+    return {
+      error: "No email address is available for this account"
+    };
+  }
+
+  const code = await createAccountActionCode({
+    userId,
+    purpose: "change-password",
+    payload: {
+      passwordHash: hashPassword(newPassword)
+    }
+  });
+
+  await sendAccountActionCodeEmail({
+    email: user.email,
+    fullName: user.full_name,
+    purpose: "change-password",
+    code
+  });
+
+  return {
+    ok: true
+  };
+}
+
+export async function confirmPasswordChange(userId, { code }) {
+  const payload = await consumeAccountActionCode({
+    userId,
+    purpose: "change-password",
+    code
+  });
+
+  if (!payload?.passwordHash) {
+    return {
+      error: "Verification code is invalid or expired"
+    };
+  }
+
+  await query("update app_users set password_hash = $1, updated_at = now() where id = $2", [payload.passwordHash, userId]);
+  await query("delete from app_sessions where user_id = $1", [userId]);
+
+  return {
+    ok: true
+  };
+}
+
+export async function requestAccountDeletionVerification(userId) {
+  const result = await query(
+    `
+      select id, email, full_name
+      from app_users
+      where id = $1
+      limit 1
+    `,
+    [userId]
+  );
+  const user = result.rows[0];
+
+  if (!user?.email) {
+    return {
+      error: "No email address is available for this account"
+    };
+  }
+
+  const code = await createAccountActionCode({
+    userId,
+    purpose: "delete-account"
+  });
+
+  await sendAccountActionCodeEmail({
+    email: user.email,
+    fullName: user.full_name,
+    purpose: "delete-account",
+    code
+  });
+
+  return {
+    ok: true
+  };
+}
+
+export async function confirmAccountDeletion(userId, { code }) {
+  const payload = await consumeAccountActionCode({
+    userId,
+    purpose: "delete-account",
+    code
+  });
+
+  if (!payload) {
+    return {
+      error: "Verification code is invalid or expired"
+    };
+  }
+
+  await query("delete from app_users where id = $1", [userId]);
 
   return {
     ok: true

@@ -1,7 +1,19 @@
 import http from "node:http";
 import { getConfigStatus } from "./src/config/env.js";
 import { runMigrations } from "./src/migrations.js";
-import { createSessionForCredentials, getUserFromToken, registerUser, requestPasswordReset, resetPassword, revokeSession } from "./src/auth.js";
+import {
+  confirmAccountDeletion,
+  confirmPasswordChange,
+  createSessionForCredentials,
+  getUserFromToken,
+  registerUser,
+  requestAccountDeletionVerification,
+  requestPasswordChangeVerification,
+  requestPasswordReset,
+  resetPassword,
+  revokeSession,
+  updateUserProfile
+} from "./src/auth.js";
 import { validateMailgunSignature, validateWebhookToken } from "./src/email-client.js";
 import {
   analyzeIntake,
@@ -148,6 +160,35 @@ const server = http.createServer(async (request, response) => {
 
     if (path.startsWith("/api/") && !path.startsWith("/api/auth/") && path !== "/api/webhooks/mailgun/inbound" && !currentUser) {
       return sendJson(response, 401, { error: "Unauthorized" });
+    }
+
+    if (request.method === "PUT" && path === "/api/account/profile") {
+      const payload = await readJsonBody(request);
+      const result = await updateUserProfile(currentUser.id, payload);
+      return sendJson(response, result.error ? 400 : 200, result.error ? result : { user: result.user });
+    }
+
+    if (request.method === "POST" && path === "/api/account/change-password/request") {
+      const payload = await readJsonBody(request);
+      const result = await requestPasswordChangeVerification(currentUser.id, payload);
+      return sendJson(response, result.error ? 400 : 200, result.error ? result : { ok: true });
+    }
+
+    if (request.method === "POST" && path === "/api/account/change-password/confirm") {
+      const payload = await readJsonBody(request);
+      const result = await confirmPasswordChange(currentUser.id, payload);
+      return sendJson(response, result.error ? 400 : 200, result);
+    }
+
+    if (request.method === "POST" && path === "/api/account/delete/request") {
+      const result = await requestAccountDeletionVerification(currentUser.id);
+      return sendJson(response, result.error ? 400 : 200, result.error ? result : { ok: true });
+    }
+
+    if (request.method === "POST" && path === "/api/account/delete/confirm") {
+      const payload = await readJsonBody(request);
+      const result = await confirmAccountDeletion(currentUser.id, payload);
+      return sendJson(response, result.error ? 400 : 200, result);
     }
 
     if (request.method === "GET" && path === "/api/plans") {
