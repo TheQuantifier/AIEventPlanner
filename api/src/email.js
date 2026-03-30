@@ -25,7 +25,7 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
-function renderHtmlEmail({ greeting, intro, sections, outro, replyTo }) {
+function renderHtmlEmail({ greeting, intro, sections, outro }) {
   const sectionMarkup = sections
     .map((section) => {
       if (section.type === "list") {
@@ -41,10 +41,6 @@ function renderHtmlEmail({ greeting, intro, sections, outro, replyTo }) {
     })
     .join("");
 
-  const replyMarkup = replyTo
-    ? `<p>You can reply directly to: <a href="mailto:${escapeHtml(replyTo)}">${escapeHtml(replyTo)}</a></p>`
-    : "";
-
   return [
     "<!doctype html>",
     '<html lang="en">',
@@ -55,7 +51,6 @@ function renderHtmlEmail({ greeting, intro, sections, outro, replyTo }) {
     `<p style="margin:0 0 16px;">${escapeHtml(intro)}</p>`,
     sectionMarkup,
     `<p style="margin:0 0 16px;">${escapeHtml(outro)}</p>`,
-    replyMarkup,
     '<p style="margin:16px 0 0;">Best,<br />AI Event Planner</p>',
     "</div>",
     "</div>",
@@ -86,8 +81,6 @@ export function buildInquiryEmail({ event, vendor, replyTo }) {
     "4. Any requirements, constraints, or next steps we should know about",
     "",
     "A short reply is fine. We are mainly trying to confirm fit, availability, and budget alignment.",
-    "",
-    replyTo ? `You can reply directly to: ${replyTo}` : "",
     "",
     "Best,",
     "AI Event Planner"
@@ -125,8 +118,7 @@ export function buildInquiryEmail({ event, vendor, replyTo }) {
           ]
         }
       ],
-      outro: "A short reply is fine. We are mainly trying to confirm fit, availability, and budget alignment.",
-      replyTo
+      outro: "A short reply is fine. We are mainly trying to confirm fit, availability, and budget alignment."
     })
   };
 }
@@ -146,8 +138,6 @@ export function buildConfirmationEmail({ event, vendor, replyTo }) {
     formatThemeLine(event),
     "",
     "Please send the next contracting steps, proposed timeline, and deposit details when ready.",
-    "",
-    replyTo ? `You can reply directly to: ${replyTo}` : "",
     "",
     "Best,",
     "AI Event Planner"
@@ -174,8 +164,7 @@ export function buildConfirmationEmail({ event, vendor, replyTo }) {
           ]
         }
       ],
-      outro: "Please send the next contracting steps, proposed timeline, and deposit details when ready.",
-      replyTo
+      outro: "Please send the next contracting steps, proposed timeline, and deposit details when ready."
     })
   };
 }

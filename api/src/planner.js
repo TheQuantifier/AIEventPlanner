@@ -1,6 +1,6 @@
 import { vendorCatalog } from "./data/vendors.js";
 import { buildConfirmationEmail, buildInquiryEmail } from "./email.js";
-import { buildPlanReplyAddress, buildUserReplyAddress, isTestModeEnabled, resolveAppInbox, sendEmail } from "./email-client.js";
+import { buildPlanReplyAddress, buildUserReplyAddress, buildUserSenderAddress, isTestModeEnabled, resolveAppInbox, sendEmail } from "./email-client.js";
 import { generateIntakeWithAi, generatePlanWithAi, isAiConfigured } from "./ai-planner.js";
 import { deletePlan, isDbConfigured, listPlans, loadPlan, savePlan } from "./db.js";
 
@@ -595,6 +595,8 @@ export async function sendPlanInquiries(planId, userId) {
       text: vendor.inquiryEmail.text || vendor.inquiryEmail.body,
       html: vendor.inquiryEmail.html,
       replyTo: vendor.inquiryEmail.replyTo,
+      fromName: plan.owner?.username || "AI Event Planner",
+      fromEmail: buildUserSenderAddress(plan.owner?.username),
       tags: ["event-inquiry", plan.id, vendor.id]
     });
 
@@ -778,6 +780,8 @@ export async function finalizeVendorSelection(planId, vendorId, userId) {
     text: confirmationEmail.text || confirmationEmail.body,
     html: confirmationEmail.html,
     replyTo: confirmationEmail.replyTo,
+    fromName: plan.owner?.username || "AI Event Planner",
+    fromEmail: buildUserSenderAddress(plan.owner?.username),
     tags: ["event-confirmation", plan.id, selectedVendor.id]
   });
 

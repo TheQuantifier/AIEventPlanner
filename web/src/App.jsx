@@ -761,6 +761,17 @@ export default function App() {
   async function handleContinue() {
     setSavingPlan(true);
     try {
+      const nextIntake = await requestJson(
+        `${apiBaseUrl}/api/intake`,
+        {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(formData)
+        },
+        "The API could not analyze the event."
+      );
+      setIntake(nextIntake);
+
       const plan = await requestJson(`${apiBaseUrl}/api/plans${editingPlanId ? `/${editingPlanId}` : ""}`, { method: editingPlanId ? "PUT" : "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(formData) }, "The API could not generate a plan.");
       setCurrentPlan(plan);
       setEditingPlanId(plan.id);

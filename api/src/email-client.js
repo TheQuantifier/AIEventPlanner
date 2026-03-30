@@ -9,6 +9,21 @@ function trimTrailingSlash(value) {
   return trim(value).replace(/\/+$/, "");
 }
 
+function escapeDisplayName(value) {
+  return String(value || "").replace(/"/g, "").trim();
+}
+
+function extractDomain(value) {
+  return trim(value).split("@")[1] || "";
+}
+
+function buildFromHeader(name, email) {
+  const resolvedEmail = trim(email) || trim(appConfig.emailClient.senderEmail);
+  const resolvedName = escapeDisplayName(name) || appConfig.emailClient.senderName || "AI Event Planner";
+
+  return `${resolvedName} <${resolvedEmail}>`;
+}
+
 export function isTestModeEnabled() {
   return isTestingStage() || trim(appConfig.emailClient.testMode).toLowerCase() === "true";
 }
@@ -69,7 +84,18 @@ export function buildUserReplyAddress({ username, planId }) {
   return `${mailbox}@${inboundDomain}`;
 }
 
-export async function sendEmail({ to, subject, text, html, replyTo, tags = [] }) {
+export function buildUserSenderAddress(username) {
+  const mailbox = trim(username).toLowerCase();
+  const domain = trim(appConfig.emailClient.inboundDomain) || extractDomain(appConfig.emailClient.senderEmail) || trim(appConfig.emailClient.domain);
+
+  if (!mailbox || !domain) {
+    return trim(appConfig.emailClient.senderEmail);
+  }
+
+  return `${mailbox}@${domain}`;
+}
+
+export async function sendEmail({ to, subject, text, html, replyTo, fromName, fromEmail, tags = [] }) {
   if (!isEmailClientConfigured()) {
     return {
       ok: false,
@@ -88,7 +114,7 @@ export async function sendEmail({ to, subject, text, html, replyTo, tags = [] })
 
   const { intendedRecipient, deliveryRecipient, deliveryMode } = resolveRecipient(to);
   const form = new URLSearchParams();
-  form.set("from", `${appConfig.emailClient.senderName || "AI Event Planner"} <${appConfig.emailClient.senderEmail}>`);
+  form.set("from", buildFromHeader(fromName, fromEmail));
   form.set("to", deliveryRecipient);
   form.set("subject", subject);
   form.set("text", text);
