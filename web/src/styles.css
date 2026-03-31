@@ -444,11 +444,16 @@ button:disabled { opacity: 0.65; cursor: not-allowed; }
   min-width: 0;
 }
 .results {
+  display: grid;
+  gap: 16px;
   width: 100%;
   min-width: 0;
 }
 .results > * {
   min-width: 0;
+}
+.carousel .panel {
+  margin-bottom: 0;
 }
 .carousel-nav {
   display: flex;
