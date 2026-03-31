@@ -35,6 +35,14 @@ const emptyDeleteSettingsForm = {
   code: ""
 };
 
+const publicPagePaths = {
+  landing: "/",
+  login: "/login",
+  register: "/register",
+  forgot: "/forgot-password",
+  reset: "/reset-password"
+};
+
 function currency(value) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -257,6 +265,30 @@ function formatEventLabel(event) {
 
 function joinEmailLines(lines) {
   return lines.filter((line) => line !== undefined && line !== null).join("\n");
+}
+
+function getPublicPageFromLocation() {
+  const { pathname, search } = window.location;
+  const resetToken = new URLSearchParams(search).get("resetToken");
+
+  if (resetToken || pathname === publicPagePaths.reset) {
+    return "reset";
+  }
+
+  switch (pathname) {
+    case publicPagePaths.login:
+      return "login";
+    case publicPagePaths.register:
+      return "register";
+    case publicPagePaths.forgot:
+      return "forgot";
+    default:
+      return "landing";
+  }
+}
+
+function getAuthModeFromPublicPage(page) {
+  return ["login", "register", "forgot", "reset"].includes(page) ? page : "login";
 }
 
 function buildInquiryPreview(event, vendor) {
@@ -748,7 +780,8 @@ function AccountPanel({
 export default function App() {
   const [sessionToken, setSessionToken] = useState("");
   const [user, setUser] = useState(null);
-  const [authMode, setAuthMode] = useState("login");
+  const [publicPage, setPublicPage] = useState(() => getPublicPageFromLocation());
+  const [authMode, setAuthMode] = useState(() => getAuthModeFromPublicPage(getPublicPageFromLocation()));
   const [authForm, setAuthForm] = useState(emptyAuthForm);
   const [authLoading, setAuthLoading] = useState(true);
   const [authBusy, setAuthBusy] = useState(false);
@@ -779,11 +812,13 @@ export default function App() {
 
   useEffect(() => {
     const resetToken = new URLSearchParams(window.location.search).get("resetToken");
-
+    const nextPublicPage = getPublicPageFromLocation();
     const storedToken = window.localStorage.getItem(authStorageKey) || "";
 
-    if (resetToken) {
-      setAuthMode("reset");
+    setPublicPage(nextPublicPage);
+    setAuthMode(getAuthModeFromPublicPage(nextPublicPage));
+
+    if (resetToken || nextPublicPage === "reset") {
       setAuthForm((current) => ({ ...current, token: resetToken }));
     }
 
@@ -794,6 +829,18 @@ export default function App() {
 
     setSessionToken(storedToken);
     loadCurrentUser(storedToken).finally(() => setAuthLoading(false));
+  }, []);
+
+  useEffect(() => {
+    function handlePopState() {
+      const nextPublicPage = getPublicPageFromLocation();
+      setPublicPage(nextPublicPage);
+      setAuthMode(getAuthModeFromPublicPage(nextPublicPage));
+      setAuthMessage("");
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   useEffect(() => {
@@ -851,6 +898,8 @@ export default function App() {
     setFormData(emptyForm);
     setAuthForm(emptyAuthForm);
     setAuthMessage("");
+    setPublicPage("landing");
+    setAuthMode("login");
     setCurrentPage("home");
     setActiveStep(0);
     setAccountMenuOpen(false);
@@ -859,6 +908,19 @@ export default function App() {
     setPasswordSettingsMessage("");
     setDeleteSettingsForm(emptyDeleteSettingsForm);
     setDeleteSettingsMessage("");
+    if (window.location.pathname !== publicPagePaths.landing || window.location.search) {
+      window.history.replaceState({}, "", publicPagePaths.landing);
+    }
+  }
+
+  function navigatePublicPage(page) {
+    const path = publicPagePaths[page] || publicPagePaths.landing;
+    if (`${window.location.pathname}${window.location.search}` !== path) {
+      window.history.pushState({}, "", path);
+    }
+    setPublicPage(page);
+    setAuthMode(getAuthModeFromPublicPage(page));
+    setAuthMessage("");
   }
 
   function authHeaders(extra = {}) {
@@ -951,12 +1013,9 @@ export default function App() {
           },
           "Failed to reset password"
         );
-        setAuthMode("login");
         setAuthForm(emptyAuthForm);
         setAuthMessage("Password updated. Sign in with your new password.");
-        if (window.location.search.includes("resetToken")) {
-          window.history.replaceState({}, "", window.location.pathname);
-        }
+        navigatePublicPage("login");
         return;
       }
 
@@ -982,6 +1041,9 @@ export default function App() {
       setCurrentPlan(null);
       setEditingPlanId(null);
       setCurrentPage("home");
+      if (window.location.pathname !== publicPagePaths.landing || window.location.search) {
+        window.history.replaceState({}, "", publicPagePaths.landing);
+      }
     } catch (error) {
       alert(error.message);
     } finally {
@@ -1331,23 +1393,31 @@ export default function App() {
 
   if (!user) {
     return (
-      <main className="shell">
-        <section className="topbar">
+      <main className="shell public-shell">
+        <section className="topbar public-topbar">
           <div>
             <p className="eyebrow">AI Event Planner</p>
-            <h1>Account access</h1>
+            <h1>{publicPage === "landing" ? "Plan the event. Let the app run the work." : "Account access"}</h1>
           </div>
-          <div className="topbar-badge">Sign in to manage event plans and inbound replies</div>
+          <div className="public-auth-actions">
+            <button type="button" className="secondary" onClick={() => navigatePublicPage("login")}>Login</button>
+            <button type="button" onClick={() => navigatePublicPage("register")}>Register</button>
+          </div>
         </section>
-        <AuthSection
-          mode={authMode}
-          formData={authForm}
-          busy={authBusy}
-          message={authMessage}
-          onChange={handleAuthFieldChange}
-          onSubmit={handleAuthSubmit}
-          onSwitch={setAuthMode}
-        />
+        {publicPage === "landing" ? (
+          <LandingPage onLogin={() => navigatePublicPage("login")} onRegister={() => navigatePublicPage("register")} />
+        ) : (
+          <AuthSection
+            mode={authMode}
+            formData={authForm}
+            busy={authBusy}
+            message={authMessage}
+            onChange={handleAuthFieldChange}
+            onSubmit={handleAuthSubmit}
+            onSwitch={navigatePublicPage}
+            onHome={() => navigatePublicPage("landing")}
+          />
+        )}
       </main>
     );
   }
@@ -1543,7 +1613,76 @@ export default function App() {
   );
 }
 
-function AuthSection({ mode, formData, busy, message, onChange, onSubmit, onSwitch }) {
+function LandingPage({ onLogin, onRegister }) {
+  return (
+    <section className="landing-page">
+      <div className="landing-hero panel">
+        <div className="landing-hero-copy">
+          <p className="section-kicker">Automated event operations</p>
+          <h2>Brief once. Source vendors, send outreach, and track replies from one workspace.</h2>
+          <p className="landing-lead">
+            AI Event Planner turns a rough event idea into a working plan with vendor categories, recommended matches,
+            outreach drafts, and a live operations dashboard your team can actually use.
+          </p>
+          <div className="landing-cta-row">
+            <button type="button" onClick={onRegister}>Create an account</button>
+            <button type="button" className="secondary" onClick={onLogin}>Sign in</button>
+          </div>
+          <div className="landing-proof-strip">
+            <span>Vendor recommendations by category</span>
+            <span>Inbox-ready outreach drafts</span>
+            <span>Reply tracking and final selection</span>
+          </div>
+        </div>
+        <div className="landing-hero-card">
+          <div className="landing-mini-card">
+            <span className="metric-label">Event status</span>
+            <strong>Plan ready in minutes</strong>
+            <p>Move from intake to shortlist, outreach, and final vendor selection without juggling spreadsheets.</p>
+          </div>
+          <div className="landing-mini-grid">
+            <div className="metric-card">
+              <span className="metric-label">Vendors shortlisted</span>
+              <strong>12</strong>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">Replies tracked</span>
+              <strong>7</strong>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">Planning steps</span>
+              <strong>4</strong>
+            </div>
+            <div className="metric-card">
+              <span className="metric-label">One workspace</span>
+              <strong>100%</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="landing-grid">
+        <article className="panel landing-feature-card">
+          <p className="section-kicker">For busy planners</p>
+          <h3>Start with a loose brief</h3>
+          <p className="fine-print">Describe the event in plain language and the app structures the intake, budget, dates, theme, and guest requirements.</p>
+        </article>
+        <article className="panel landing-feature-card">
+          <p className="section-kicker">For vendor sourcing</p>
+          <h3>Get curated matches fast</h3>
+          <p className="fine-print">Recommended vendor groups stay tied to the event direction so your shortlist is easier to review and action.</p>
+        </article>
+        <article className="panel landing-feature-card">
+          <p className="section-kicker">For execution</p>
+          <h3>Keep outreach moving</h3>
+          <p className="fine-print">Draft inquiries, send outreach, monitor replies, and finalize the right fit without losing context between tools.</p>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function AuthSection({ mode, formData, busy, message, onChange, onSubmit, onSwitch, onHome }) {
   const isLogin = mode === "login";
   const isRegister = mode === "register";
   const isForgot = mode === "forgot";
@@ -1552,6 +1691,9 @@ function AuthSection({ mode, formData, busy, message, onChange, onSubmit, onSwit
   return (
     <section className="auth-shell">
       <div className="panel auth-panel">
+        <div className="auth-panel-topline">
+          <button type="button" className="secondary" onClick={onHome}>Back to home</button>
+        </div>
         <p className="section-kicker">Account</p>
         <h2>{isLogin ? "Sign in" : isRegister ? "Create account" : isForgot ? "Reset password" : "Choose a new password"}</h2>
         <p className="fine-print">
@@ -1622,7 +1764,12 @@ function AuthSection({ mode, formData, busy, message, onChange, onSubmit, onSwit
               {busy ? "Working..." : isLogin ? "Sign in" : isRegister ? "Create account" : isForgot ? "Send reset email" : "Update password"}
             </button>
             {!isReset ? (
-              <button type="button" className="secondary" disabled={busy} onClick={() => onSwitch(isLogin ? "register" : "login")}>
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={() => onSwitch(isLogin ? "register" : "login")}
+              >
                 {isLogin ? "Need an account?" : "Back to sign in"}
               </button>
             ) : null}
