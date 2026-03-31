@@ -38,6 +38,7 @@ button {
   cursor: pointer;
   font-weight: 700;
   box-shadow: 0 12px 28px rgba(77, 209, 200, 0.18);
+  max-width: 100%;
 }
 button:disabled { opacity: 0.65; cursor: not-allowed; }
 .secondary {
@@ -142,6 +143,9 @@ button:disabled { opacity: 0.65; cursor: not-allowed; }
   background: rgba(255, 255, 255, 0.04);
   color: var(--muted);
   font-size: 0.88rem;
+  max-width: 100%;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .panel {
@@ -382,6 +386,8 @@ button:disabled { opacity: 0.65; cursor: not-allowed; }
   font-weight: 600;
   box-shadow: none;
   max-width: 100%;
+  white-space: normal;
+  text-align: left;
 }
 .tab-button.active {
   background: var(--accent);
@@ -551,6 +557,7 @@ textarea::placeholder, input::placeholder { color: #7d8daa; }
   padding-right: 6px;
 }
 .vendor-meta { margin: 8px 0 10px; justify-content: space-between; color: var(--muted); font-size: 0.94rem; }
+.vendor-meta { justify-content: flex-start; gap: 8px 14px; }
 .vendor-price-block { display: grid; justify-items: end; gap: 8px; }
 .status-contacted, .status-replied, .table-status-good { background: rgba(77, 209, 200, 0.14); border-color: rgba(77, 209, 200, 0.22); color: #baf6f0; }
 .status-available { background: rgba(138, 168, 255, 0.12); border-color: rgba(138, 168, 255, 0.2); }
@@ -558,7 +565,7 @@ textarea::placeholder, input::placeholder { color: #7d8daa; }
 .table-status-muted { background: rgba(255, 255, 255, 0.06); color: var(--muted); }
 .fine-print, .event-meta, .event-detail { color: var(--muted); font-size: 0.92rem; }
 
-.dashboard-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.dashboard-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 12px; }
 .metric-card { padding: 14px 16px; }
 .metric-label { display: block; margin-bottom: 10px; color: var(--muted); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.1em; }
 .metric-card strong { font-size: 1.5rem; }
@@ -577,12 +584,16 @@ textarea::placeholder, input::placeholder { color: #7d8daa; }
   align-items: center;
   padding: 14px 16px;
 }
+.event-main,
+.event-status {
+  min-width: 0;
+}
 .event-status { display: grid; gap: 6px; }
 .event-actions { justify-content: end; }
 .icon-button { min-width: 42px; min-height: 42px; padding: 0; display: inline-grid; place-items: center; font-size: 1rem; }
 
 .email-preview { margin: 16px 0; }
-.email-preview summary { cursor: pointer; font-weight: 700; color: #dbe7fe; }
+.email-preview summary { cursor: pointer; font-weight: 700; color: #dbe7fe; overflow-wrap: anywhere; }
 .email-preview pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -594,6 +605,29 @@ textarea::placeholder, input::placeholder { color: #7d8daa; }
   color: var(--muted);
   font-family: inherit;
   line-height: 1.6;
+}
+
+@media (max-width: 1024px) {
+  .topbar {
+    align-items: start;
+  }
+  .topbar-actions {
+    justify-content: flex-start;
+  }
+  .event-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+  .event-status {
+    grid-column: 1 / -1;
+  }
+  .event-actions {
+    justify-content: start;
+  }
+  .carousel-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 900px) {
@@ -667,6 +701,7 @@ textarea::placeholder, input::placeholder { color: #7d8daa; }
   .landing-cta-row button,
   .carousel-nav button,
   .topbar-actions button,
+  .action-row button,
   .tab-button,
   .direction-actions button,
   .matches-actions button,
@@ -687,6 +722,13 @@ textarea::placeholder, input::placeholder { color: #7d8daa; }
   .event-actions {
     justify-content: start;
     grid-auto-flow: column;
+  }
+  .event-main,
+  .event-status,
+  .event-title-row,
+  .account-menu-header,
+  .account-menu-item {
+    overflow-wrap: anywhere;
   }
   .vendor-group-card,
   .vendor-card {
@@ -745,8 +787,14 @@ textarea::placeholder, input::placeholder { color: #7d8daa; }
   .vendor-meta {
     display: grid;
   }
+  .carousel-tabs {
+    grid-template-columns: 1fr;
+  }
   .section-heading {
     gap: 12px;
+  }
+  .event-title-row {
+    display: grid;
   }
   .vendor-group-scroll {
     max-height: none;
