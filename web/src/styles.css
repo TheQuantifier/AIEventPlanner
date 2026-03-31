@@ -147,6 +147,25 @@ button:disabled { opacity: 0.65; cursor: not-allowed; }
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
+.topbar-badge,
+.editor-state,
+.section-heading,
+.section-heading > div,
+.vendor-group-header,
+.vendor-group-header > div,
+.event-main,
+.event-title-row,
+.vendor-topline > div,
+.vendor-price-block,
+.metric-card,
+.follow-up-item,
+.summary,
+.vendor-card,
+.vendor-group-card,
+.account-menu,
+.account-menu-header {
+  min-width: 0;
+}
 
 .panel {
   background: var(--panel);
@@ -525,6 +544,34 @@ textarea::placeholder, input::placeholder { color: #7d8daa; }
 .chip { background: var(--accent-soft); }
 .follow-up-item { padding: 14px 16px; color: var(--muted); }
 .follow-up-item strong { color: var(--ink); }
+.section-heading h1,
+.section-heading h2,
+.section-heading h3,
+.event-title-row strong,
+.vendor-group-header h3,
+.vendor-card h3,
+.vendor-card p,
+.vendor-card span,
+.vendor-card strong,
+.follow-up-item,
+.follow-up-item strong,
+.summary p,
+.fine-print,
+.event-meta,
+.event-detail,
+.metric-label,
+.metric-card strong,
+.landing-proof-strip span,
+.account-menu-header,
+.account-menu-header strong,
+.account-menu-item,
+.tab-button,
+.chip,
+.table-pill,
+.table-status,
+.status-pill {
+  overflow-wrap: anywhere;
+}
 
 .vendor-card {
   border: 1px solid var(--line);
@@ -757,9 +804,33 @@ textarea::placeholder, input::placeholder { color: #7d8daa; }
   }
   .topbar-actions {
     width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .topbar-actions > button {
+    grid-column: 1 / -1;
+  }
+  .account-menu-wrap {
+    justify-self: end;
+  }
+  .account-avatar-button {
+    min-width: 46px;
+    min-height: 46px;
   }
   h1 { font-size: 1.55rem; }
   .action-row { display: grid; }
+}
+
+@media (max-width: 560px) {
+  .grid,
+  .composer-expanded > .grid {
+    grid-template-columns: 1fr;
+  }
+  .topbar-badge,
+  .editor-state {
+    font-size: 0.82rem;
+    padding: 9px 12px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -792,6 +863,13 @@ textarea::placeholder, input::placeholder { color: #7d8daa; }
   }
   .section-heading {
     gap: 12px;
+  }
+  .topbar-actions {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .topbar-actions > button {
+    grid-column: 1 / -1;
   }
   .event-title-row {
     display: grid;

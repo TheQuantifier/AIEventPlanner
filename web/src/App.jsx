@@ -422,7 +422,7 @@ function SharedComposer({
           <p className="section-kicker">{mode === "workspace" ? "Event workspace" : "Create event"}</p>
           <h2>{mode === "workspace" ? "Refine the event brief" : "Start with the event idea"}</h2>
         </div>
-        {mode === "workspace" && editingPlanId ? <div className="editor-state">Editing {getEventDisplayName(currentPlan) || "event"} | {editingPlanId}</div> : null}
+        {mode === "workspace" && editingPlanId ? <div className="editor-state">Editing {getEventDisplayName(currentPlan) || "event"}</div> : null}
       </div>
       <form className="planner-form" onSubmit={onSubmit}>
         <label className="field field-large">
@@ -1449,7 +1449,7 @@ export default function App() {
               Back to dashboard
             </button>
           ) : null}
-          <div className="topbar-badge">Workflow orchestration for live event plans</div>
+          <div className="topbar-badge">Live event workflow</div>
           <div className="account-menu-wrap" ref={accountMenuRef}>
             <button
               type="button"
