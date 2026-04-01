@@ -30,6 +30,13 @@ import {
 
 const PORT = Number(process.env.PORT || 4000);
 
+class HttpError extends Error {
+  constructor(statusCode, message) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     "Content-Type": "application/json",
@@ -62,7 +69,11 @@ async function readJsonBody(request) {
     return {};
   }
 
-  return JSON.parse(body);
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new HttpError(400, "Invalid JSON body");
+  }
 }
 
 async function readFormBody(request) {
@@ -302,10 +313,11 @@ const server = http.createServer(async (request, response) => {
 
     return sendNotFound(response);
   } catch (error) {
-    return sendJson(response, 500, {
-      error: "Internal server error",
-      details: error instanceof Error ? error.message : String(error)
-    });
+    const statusCode = error?.statusCode || 500;
+    const message = error instanceof Error ? error.message : String(error);
+    return sendJson(response, statusCode, statusCode === 500
+      ? { error: "Internal server error", details: message }
+      : { error: message });
   }
 });
 

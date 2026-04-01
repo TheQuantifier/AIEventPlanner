@@ -587,6 +587,7 @@ export async function analyzeIntake(payload) {
 async function buildPlanDocument(payload, user, existingPlan = null) {
   const planId = existingPlan?.id || createId("plan");
   const replyTo = existingPlan?.communication?.replyTo || buildUserReplyAddress({ username: user?.username, planId }) || buildPlanReplyAddress(planId);
+  const existingCommunication = existingPlan?.communication;
   let event;
   let vendorCategories;
   let shortlist;
@@ -622,16 +623,18 @@ async function buildPlanDocument(payload, user, existingPlan = null) {
 
   const communication = {
     replyTo,
-    outboundMessages: [],
-    inboundMessages: []
+    outboundMessages: Array.isArray(existingCommunication?.outboundMessages) ? existingCommunication.outboundMessages : [],
+    inboundMessages: Array.isArray(existingCommunication?.inboundMessages) ? existingCommunication.inboundMessages : []
   };
-  const preservedShortlist = preserveShortlistState(shortlist, []);
+  const preservedShortlist = preserveShortlistState(shortlist, existingPlan?.shortlist || []);
+  const inquiryEmailsSent = communication.outboundMessages.filter((message) => message.type === "inquiry" && message.delivery?.ok).length;
+  const vendorRepliesReceived = communication.inboundMessages.length;
 
   return {
     id: planId,
     createdAt: existingPlan?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    workflowState: "awaiting-user-selection",
+    workflowState: existingPlan?.workflowState || "awaiting-user-selection",
     isPaused: Boolean(existingPlan?.isPaused),
     owner: buildOwnerSummary(user),
     event,
@@ -641,11 +644,11 @@ async function buildPlanDocument(payload, user, existingPlan = null) {
       inquiryEmailsDrafted: preservedShortlist.filter((vendor) =>
         vendorCategories.some((category) => category.selected && category.key === normalizeCategoryKey(vendor.category))
       ).length,
-      inquiryEmailsSent: 0,
-      vendorRepliesReceived: 0
+      inquiryEmailsSent,
+      vendorRepliesReceived
     },
     shortlist: preservedShortlist,
-    finalSelection: null
+    finalSelection: existingPlan?.finalSelection || null
   };
 }
 
