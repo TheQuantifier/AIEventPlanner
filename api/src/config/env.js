@@ -43,6 +43,19 @@ export const appConfig = {
     provider: read("AI_PROVIDER"),
     apiKey: read("AI_API_KEY"),
     model: read("AI_MODEL")
+  },
+  calendar: {
+    google: {
+      clientId: read("GOOGLE_OAUTH_CLIENT_ID"),
+      clientSecret: read("GOOGLE_OAUTH_CLIENT_SECRET"),
+      redirectUri: read("GOOGLE_OAUTH_REDIRECT_URI")
+    },
+    microsoft: {
+      clientId: read("MICROSOFT_OAUTH_CLIENT_ID"),
+      clientSecret: read("MICROSOFT_OAUTH_CLIENT_SECRET"),
+      redirectUri: read("MICROSOFT_OAUTH_REDIRECT_URI"),
+      tenant: read("MICROSOFT_OAUTH_TENANT", "common")
+    }
   }
 };
 
@@ -70,6 +83,14 @@ export function getConfigStatus() {
     ai: {
       provider: appConfig.ai.provider || "unset",
       configured: Boolean(appConfig.ai.apiKey)
+    },
+    calendar: {
+      google: {
+        configured: Boolean(appConfig.calendar.google.clientId && appConfig.calendar.google.clientSecret && appConfig.calendar.google.redirectUri)
+      },
+      microsoft: {
+        configured: Boolean(appConfig.calendar.microsoft.clientId && appConfig.calendar.microsoft.clientSecret && appConfig.calendar.microsoft.redirectUri)
+      }
     }
   };
 }

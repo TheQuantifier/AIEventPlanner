@@ -313,7 +313,7 @@ export async function createSessionForCredentials({ identifier, email, username,
 
   if (!user || !verifyPassword(password, user.password_hash)) {
     return {
-      error: "Invalid email/username or password"
+      error: "Incorrect email/username or password"
     };
   }
 

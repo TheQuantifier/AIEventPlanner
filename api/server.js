@@ -1,6 +1,15 @@
 import http from "node:http";
-import { getConfigStatus } from "./src/config/env.js";
+import { appConfig, getConfigStatus } from "./src/config/env.js";
 import { runMigrations } from "./src/migrations.js";
+import {
+  createCalendarAuthUrl,
+  createCalendarEvent,
+  deleteCalendarAccount,
+  getCalendarTimeline,
+  handleCalendarOAuthCallback,
+  listCalendarAccounts,
+  updateCalendarEvent
+} from "./src/calendar.js";
 import {
   confirmAccountDeletion,
   confirmPasswordChange,
@@ -45,6 +54,14 @@ function sendJson(response, statusCode, payload) {
     "Access-Control-Allow-Headers": "Content-Type, Authorization"
   });
   response.end(JSON.stringify(payload, null, 2));
+}
+
+function sendHtml(response, statusCode, html) {
+  response.writeHead(statusCode, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Access-Control-Allow-Origin": "*"
+  });
+  response.end(html);
 }
 
 function sendNotFound(response) {
@@ -118,7 +135,7 @@ const server = http.createServer(async (request, response) => {
   const path = url.pathname;
 
   try {
-    const currentUser = path.startsWith("/api/") && !path.startsWith("/api/auth/") && path !== "/api/webhooks/mailgun/inbound"
+    const currentUser = path.startsWith("/api/") && !path.startsWith("/api/auth/") && path !== "/api/webhooks/mailgun/inbound" && !path.startsWith("/api/calendar/callback")
       ? await getUserFromToken(extractBearerToken(request))
       : null;
 
@@ -169,7 +186,7 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, result.error ? 400 : 200, result);
     }
 
-    if (path.startsWith("/api/") && !path.startsWith("/api/auth/") && path !== "/api/webhooks/mailgun/inbound" && !currentUser) {
+    if (path.startsWith("/api/") && !path.startsWith("/api/auth/") && path !== "/api/webhooks/mailgun/inbound" && !path.startsWith("/api/calendar/callback") && !currentUser) {
       return sendJson(response, 401, { error: "Unauthorized" });
     }
 
@@ -200,6 +217,81 @@ const server = http.createServer(async (request, response) => {
       const payload = await readJsonBody(request);
       const result = await confirmAccountDeletion(currentUser.id, payload);
       return sendJson(response, result.error ? 400 : 200, result);
+    }
+
+    if (request.method === "GET" && path === "/api/calendar/accounts") {
+      const accounts = await listCalendarAccounts(currentUser.id);
+      return sendJson(response, 200, { items: accounts });
+    }
+
+    if (request.method === "POST" && path.startsWith("/api/calendar/connect/")) {
+      const provider = path.replace("/api/calendar/connect/", "");
+      const url = await createCalendarAuthUrl(currentUser.id, provider);
+      return sendJson(response, 200, { url });
+    }
+
+    if (request.method === "GET" && path.startsWith("/api/calendar/callback/")) {
+      const provider = path.replace("/api/calendar/callback/", "");
+      const code = url.searchParams.get("code") || "";
+      const state = url.searchParams.get("state") || "";
+      const error = url.searchParams.get("error");
+
+      if (error) {
+        return sendHtml(response, 400, `<p>Calendar authorization failed: ${error}</p>`);
+      }
+
+      if (!code || !state) {
+        return sendHtml(response, 400, "<p>Missing authorization details.</p>");
+      }
+
+      try {
+        const account = await handleCalendarOAuthCallback({ provider, code, state });
+        const redirectBase = appConfig.app.webBaseUrl || appConfig.app.baseUrl || "";
+        if (redirectBase) {
+          const redirectUrl = new URL(redirectBase.replace(/\/+$/, "") + "/");
+          redirectUrl.searchParams.set("calendar", "connected");
+          redirectUrl.searchParams.set("provider", account.provider);
+          return sendHtml(
+            response,
+            200,
+            `<html><head><meta http-equiv="refresh" content="0; url=${redirectUrl.toString()}" /></head><body>Calendar connected. You can close this window.</body></html>`
+          );
+        }
+
+        return sendJson(response, 200, { ok: true, account });
+      } catch (callbackError) {
+        return sendHtml(
+          response,
+          400,
+          `<p>Calendar authorization failed: ${callbackError instanceof Error ? callbackError.message : String(callbackError)}</p>`
+        );
+      }
+    }
+
+    if (request.method === "DELETE" && path.startsWith("/api/calendar/accounts/")) {
+      const accountId = path.replace("/api/calendar/accounts/", "");
+      const removed = await deleteCalendarAccount(currentUser.id, accountId);
+      return sendJson(response, removed ? 200 : 404, removed ? { ok: true } : { error: "Calendar account not found" });
+    }
+
+    if (request.method === "GET" && path === "/api/calendar/timeline") {
+      const start = url.searchParams.get("start");
+      const end = url.searchParams.get("end");
+      const timeline = await getCalendarTimeline(currentUser.id, { start, end });
+      return sendJson(response, 200, timeline);
+    }
+
+    if (request.method === "POST" && path === "/api/calendar/events") {
+      const payload = await readJsonBody(request);
+      const result = await createCalendarEvent(currentUser.id, payload);
+      return sendJson(response, 200, result);
+    }
+
+    if (request.method === "PATCH" && path.startsWith("/api/calendar/events/")) {
+      const calendarEventId = path.replace("/api/calendar/events/", "");
+      const payload = await readJsonBody(request);
+      const result = await updateCalendarEvent(currentUser.id, calendarEventId, payload);
+      return sendJson(response, result.error ? 404 : 200, result.error ? result : { ok: true });
     }
 
     if (request.method === "GET" && path === "/api/plans") {

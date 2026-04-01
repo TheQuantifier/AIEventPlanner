@@ -35,6 +35,17 @@ const emptyDeleteSettingsForm = {
   code: ""
 };
 
+const emptyCalendarEventForm = {
+  title: "Event hold",
+  start: "",
+  end: "",
+  timeZone: "",
+  description: "",
+  location: "",
+  accountIds: [],
+  planId: ""
+};
+
 const publicPagePaths = {
   landing: "/",
   login: "/login",
@@ -63,6 +74,23 @@ function formatDate(value) {
 function formatBudgetInput(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? `$${numeric.toLocaleString()}` : "";
+}
+
+function toLocalDateTimeInput(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return "";
+  const offsetMs = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function toIsoFromLocalInput(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function guessTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
 function getUserInitials(user) {
@@ -683,7 +711,8 @@ function AccountPanel({
   deleteMessage,
   onDeleteChange,
   onDeleteRequest,
-  onDeleteConfirm
+  onDeleteConfirm,
+  calendarState
 }) {
   if (view === "profile") {
     return (
@@ -770,6 +799,7 @@ function AccountPanel({
             </div>
           </form>
         </div>
+        <CalendarPanel {...calendarState} />
       </section>
     );
   }
@@ -808,6 +838,24 @@ export default function App() {
   const [deleteSettingsForm, setDeleteSettingsForm] = useState(emptyDeleteSettingsForm);
   const [deleteSettingsBusy, setDeleteSettingsBusy] = useState(false);
   const [deleteSettingsMessage, setDeleteSettingsMessage] = useState("");
+  const [calendarAccounts, setCalendarAccounts] = useState([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
+  const [calendarMessage, setCalendarMessage] = useState("");
+  const [calendarTimeline, setCalendarTimeline] = useState(null);
+  const [calendarTimelineLoading, setCalendarTimelineLoading] = useState(false);
+  const [calendarRange, setCalendarRange] = useState(() => ({
+    start: toLocalDateTimeInput(new Date()),
+    end: toLocalDateTimeInput(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
+  }));
+  const [calendarEventForm, setCalendarEventForm] = useState(() => ({
+    ...emptyCalendarEventForm,
+    start: toLocalDateTimeInput(new Date()),
+    end: toLocalDateTimeInput(new Date(Date.now() + 2 * 60 * 60 * 1000)),
+    timeZone: guessTimeZone()
+  }));
+  const [calendarEventBusy, setCalendarEventBusy] = useState(false);
+  const [calendarEventMessage, setCalendarEventMessage] = useState("");
+  const [lastCalendarEventId, setLastCalendarEventId] = useState("");
   const accountMenuRef = useRef(null);
 
   useEffect(() => {
@@ -875,6 +923,38 @@ export default function App() {
       organization: user?.organization || ""
     });
   }, [user?.fullName, user?.email, user?.organization]);
+
+  useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams(window.location.search);
+    const calendarStatus = params.get("calendar");
+    const provider = params.get("provider");
+    if (calendarStatus === "connected") {
+      setCalendarMessage(`Calendar connected${provider ? ` (${provider})` : ""}.`);
+      setCurrentPage("settings");
+      params.delete("calendar");
+      params.delete("provider");
+      const nextQuery = params.toString();
+      const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`;
+      window.history.replaceState({}, "", nextUrl);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    loadCalendarAccounts();
+  }, [user]);
+
+  useEffect(() => {
+    if (calendarAccounts.length === 0) {
+      return;
+    }
+    setCalendarEventForm((current) => (
+      current.accountIds.length > 0
+        ? current
+        : { ...current, accountIds: calendarAccounts.map((account) => account.id) }
+    ));
+  }, [calendarAccounts]);
 
   useEffect(() => {
     function handleDocumentClick(event) {
@@ -1195,6 +1275,141 @@ export default function App() {
     } catch (error) {
       setDeleteSettingsMessage(error.message);
       setDeleteSettingsBusy(false);
+    }
+  }
+
+  async function loadCalendarAccounts() {
+    setCalendarLoading(true);
+    try {
+      const payload = await requestJson(`${apiBaseUrl}/api/calendar/accounts`, { headers: authHeaders() }, "Failed to load calendars");
+      setCalendarAccounts(Array.isArray(payload.items) ? payload.items : []);
+    } catch (error) {
+      setCalendarMessage(error.message);
+    } finally {
+      setCalendarLoading(false);
+    }
+  }
+
+  async function handleCalendarConnect(provider) {
+    setCalendarMessage("");
+    try {
+      const payload = await requestJson(
+        `${apiBaseUrl}/api/calendar/connect/${provider}`,
+        { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }) },
+        "Failed to start calendar connection"
+      );
+      if (payload.url) {
+        window.location.href = payload.url;
+      }
+    } catch (error) {
+      setCalendarMessage(error.message);
+    }
+  }
+
+  async function handleCalendarDisconnect(accountId) {
+    setCalendarMessage("");
+    try {
+      await requestJson(
+        `${apiBaseUrl}/api/calendar/accounts/${accountId}`,
+        { method: "DELETE", headers: authHeaders() },
+        "Failed to disconnect calendar"
+      );
+      await loadCalendarAccounts();
+      setCalendarTimeline(null);
+    } catch (error) {
+      setCalendarMessage(error.message);
+    }
+  }
+
+  function handleCalendarRangeChange(event) {
+    const { name, value } = event.target;
+    setCalendarRange((current) => ({ ...current, [name]: value }));
+  }
+
+  async function handleRefreshTimeline() {
+    setCalendarTimelineLoading(true);
+    setCalendarMessage("");
+    try {
+      const start = toIsoFromLocalInput(calendarRange.start);
+      const end = toIsoFromLocalInput(calendarRange.end);
+      const timeline = await requestJson(
+        `${apiBaseUrl}/api/calendar/timeline?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+        { headers: authHeaders() },
+        "Failed to load calendar timeline"
+      );
+      setCalendarTimeline(timeline);
+    } catch (error) {
+      setCalendarMessage(error.message);
+    } finally {
+      setCalendarTimelineLoading(false);
+    }
+  }
+
+  function handleCalendarEventChange(event) {
+    const { name, value } = event.target;
+    setCalendarEventForm((current) => ({ ...current, [name]: value }));
+    setCalendarEventMessage("");
+  }
+
+  function handleToggleCalendarAccount(accountId, selected) {
+    setCalendarEventForm((current) => {
+      const nextIds = new Set(current.accountIds);
+      if (selected) nextIds.add(accountId);
+      else nextIds.delete(accountId);
+      return { ...current, accountIds: Array.from(nextIds) };
+    });
+  }
+
+  async function handleCreateCalendarEvent(event) {
+    event.preventDefault();
+    setCalendarEventBusy(true);
+    setCalendarEventMessage("");
+    try {
+      const payload = {
+        ...calendarEventForm,
+        start: toIsoFromLocalInput(calendarEventForm.start),
+        end: toIsoFromLocalInput(calendarEventForm.end),
+        planId: currentPlan?.id || ""
+      };
+      const result = await requestJson(
+        `${apiBaseUrl}/api/calendar/events`,
+        { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(payload) },
+        "Failed to create calendar event"
+      );
+      const first = result.results?.find((item) => item.calendarEventId);
+      if (first?.calendarEventId) {
+        setLastCalendarEventId(first.calendarEventId);
+      }
+      setCalendarEventMessage("Calendar hold created.");
+      await handleRefreshTimeline();
+    } catch (error) {
+      setCalendarEventMessage(error.message);
+    } finally {
+      setCalendarEventBusy(false);
+    }
+  }
+
+  async function handleUpdateCalendarEvent() {
+    if (!lastCalendarEventId) return;
+    setCalendarEventBusy(true);
+    setCalendarEventMessage("");
+    try {
+      const payload = {
+        ...calendarEventForm,
+        start: toIsoFromLocalInput(calendarEventForm.start),
+        end: toIsoFromLocalInput(calendarEventForm.end)
+      };
+      await requestJson(
+        `${apiBaseUrl}/api/calendar/events/${lastCalendarEventId}`,
+        { method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(payload) },
+        "Failed to update calendar event"
+      );
+      setCalendarEventMessage("Calendar hold updated.");
+      await handleRefreshTimeline();
+    } catch (error) {
+      setCalendarEventMessage(error.message);
+    } finally {
+      setCalendarEventBusy(false);
     }
   }
 
@@ -1606,6 +1821,26 @@ export default function App() {
             onDeleteChange={handleDeleteSettingsChange}
             onDeleteRequest={handleDeleteCodeRequest}
             onDeleteConfirm={handleDeleteAccountConfirm}
+            calendarState={{
+              accounts: calendarAccounts,
+              loadingAccounts: calendarLoading,
+              message: calendarMessage,
+              onConnect: handleCalendarConnect,
+              onDisconnect: handleCalendarDisconnect,
+              timeline: calendarTimeline,
+              timelineLoading: calendarTimelineLoading,
+              range: calendarRange,
+              onRangeChange: handleCalendarRangeChange,
+              onRefreshTimeline: handleRefreshTimeline,
+              eventForm: calendarEventForm,
+              onEventChange: handleCalendarEventChange,
+              onToggleAccount: handleToggleCalendarAccount,
+              onCreateEvent: handleCreateCalendarEvent,
+              eventBusy: calendarEventBusy,
+              eventMessage: calendarEventMessage,
+              lastCalendarEventId,
+              onUpdateEvent: handleUpdateCalendarEvent
+            }}
           />
         </section>
       )}
@@ -1782,5 +2017,170 @@ function AuthSection({ mode, formData, busy, message, onChange, onSubmit, onSwit
         </form>
       </div>
     </section>
+  );
+}
+
+function CalendarPanel({
+  accounts,
+  loadingAccounts,
+  message,
+  onConnect,
+  onDisconnect,
+  timeline,
+  timelineLoading,
+  range,
+  onRangeChange,
+  onRefreshTimeline,
+  eventForm,
+  onEventChange,
+  onToggleAccount,
+  onCreateEvent,
+  eventBusy,
+  eventMessage,
+  lastCalendarEventId,
+  onUpdateEvent
+}) {
+  return (
+    <div className="calendar-panel">
+      <div className="section-heading">
+        <div>
+          <p className="section-kicker">Calendar</p>
+          <h2>Availability and holds</h2>
+        </div>
+      </div>
+      <div className="calendar-actions">
+        <button type="button" className="secondary" onClick={() => onConnect("google")} disabled={loadingAccounts}>
+          Connect Google Calendar
+        </button>
+        <button type="button" className="secondary" onClick={() => onConnect("microsoft")} disabled={loadingAccounts}>
+          Connect Microsoft Calendar
+        </button>
+      </div>
+      {message ? <p className="fine-print">{message}</p> : null}
+      <div className="calendar-accounts">
+        {loadingAccounts ? (
+          <p className="fine-print">Loading connected calendars…</p>
+        ) : accounts.length === 0 ? (
+          <p className="fine-print">No calendars connected yet.</p>
+        ) : (
+          accounts.map((account) => {
+            const label = account.displayName || account.display_name || account.email || "Connected account";
+            return (
+            <div key={account.id} className="calendar-account-row">
+              <div>
+                <strong>{account.provider}</strong>
+                <span className="fine-print">{label}</span>
+              </div>
+              <button type="button" className="secondary danger" onClick={() => onDisconnect(account.id)}>
+                Disconnect
+              </button>
+            </div>
+          )})
+        )}
+      </div>
+      <div className="calendar-timeline">
+        <div className="calendar-range">
+          <label className="field">
+            <span>Start</span>
+            <input type="datetime-local" name="start" value={range.start} onChange={onRangeChange} />
+          </label>
+          <label className="field">
+            <span>End</span>
+            <input type="datetime-local" name="end" value={range.end} onChange={onRangeChange} />
+          </label>
+          <button type="button" onClick={onRefreshTimeline} disabled={timelineLoading}>
+            {timelineLoading ? "Refreshing…" : "Refresh timeline"}
+          </button>
+        </div>
+        {timeline ? (
+          <div className="calendar-grid">
+            <div className="calendar-block">
+              <h3>Busy blocks</h3>
+              {timeline.busy?.length ? (
+                timeline.busy.map((block, index) => (
+                  <div key={`${block.start}-${block.end}-${index}`} className="calendar-item">
+                    <strong>{formatDate(block.start)}</strong>
+                    <span className="fine-print">to {formatDate(block.end)}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="fine-print">No busy blocks found for this range.</p>
+              )}
+            </div>
+            <div className="calendar-block">
+              <h3>Free blocks</h3>
+              {timeline.free?.length ? (
+                timeline.free.map((block, index) => (
+                  <div key={`${block.start}-${block.end}-${index}`} className="calendar-item">
+                    <strong>{formatDate(block.start)}</strong>
+                    <span className="fine-print">to {formatDate(block.end)}</span>
+                  </div>
+                ))
+              ) : (
+                <p className="fine-print">No free time found in this range.</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <p className="fine-print">Connect calendars to view the timeline.</p>
+        )}
+      </div>
+      <form className="planner-form calendar-event-form" onSubmit={onCreateEvent}>
+        <h3>Create or update a hold</h3>
+        <div className="grid">
+          <label className="field">
+            <span>Title</span>
+            <input name="title" value={eventForm.title} onChange={onEventChange} placeholder="Event hold" />
+          </label>
+          <label className="field">
+            <span>Time zone</span>
+            <input name="timeZone" value={eventForm.timeZone} onChange={onEventChange} placeholder="America/New_York" />
+          </label>
+          <label className="field">
+            <span>Start</span>
+            <input type="datetime-local" name="start" value={eventForm.start} onChange={onEventChange} />
+          </label>
+          <label className="field">
+            <span>End</span>
+            <input type="datetime-local" name="end" value={eventForm.end} onChange={onEventChange} />
+          </label>
+          <label className="field">
+            <span>Location</span>
+            <input name="location" value={eventForm.location} onChange={onEventChange} placeholder="Venue or city" />
+          </label>
+          <label className="field">
+            <span>Description</span>
+            <input name="description" value={eventForm.description} onChange={onEventChange} placeholder="Optional note" />
+          </label>
+        </div>
+        <div className="calendar-account-picks">
+          {accounts.length === 0 ? (
+            <p className="fine-print">Connect a calendar to create a hold.</p>
+          ) : (
+            accounts.map((account) => (
+              <label key={account.id} className="calendar-account-pick">
+                <input
+                  type="checkbox"
+                  checked={eventForm.accountIds.includes(account.id)}
+                  onChange={(event) => onToggleAccount(account.id, event.target.checked)}
+                />
+                <span>{account.provider} · {account.displayName || account.display_name || account.email}</span>
+              </label>
+            ))
+          )}
+        </div>
+        {eventMessage ? <p className="fine-print">{eventMessage}</p> : null}
+        <div className="action-row">
+          <button type="submit" disabled={eventBusy}>
+            {eventBusy ? "Saving…" : "Create hold"}
+          </button>
+          {lastCalendarEventId ? (
+            <button type="button" className="secondary" onClick={onUpdateEvent} disabled={eventBusy}>
+              Update last hold
+            </button>
+          ) : null}
+        </div>
+      </form>
+    </div>
   );
 }

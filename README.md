@@ -85,7 +85,15 @@ The repo includes both `.env` and `.env.example` with provider-agnostic names so
 - `AI_MODEL`
 - `APP_STAGE`
 - `APP_BASE_URL`
+- `WEB_BASE_URL`
 - `API_BASE_URL`
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `GOOGLE_OAUTH_REDIRECT_URI`
+- `MICROSOFT_OAUTH_CLIENT_ID`
+- `MICROSOFT_OAUTH_CLIENT_SECRET`
+- `MICROSOFT_OAUTH_REDIRECT_URI`
+- `MICROSOFT_OAUTH_TENANT`
 
 Example mapping:
 
@@ -114,6 +122,13 @@ Mailgun notes:
 - For Render, use your public Render API URL or custom domain, for example `https://api.manuswebworks.org`
 - The app generates a per-user reply-to address with a plan suffix like `johnhand+plan-abc123@reply.manuswebworks.org`
 - Important: external providers like Mailgun cannot call back to `localhost`, so inbound webhook setup must use your public Render URL, not a local URL
+
+Calendar notes:
+
+- Set `WEB_BASE_URL` to the public web app URL so calendar OAuth can redirect back to the UI.
+- Google OAuth redirect must match `GOOGLE_OAUTH_REDIRECT_URI` (e.g. `http://localhost:4000/api/calendar/callback/google`).
+- Microsoft OAuth redirect must match `MICROSOFT_OAUTH_REDIRECT_URI` (e.g. `http://localhost:4000/api/calendar/callback/microsoft`).
+- Microsoft tenant defaults to `common` but can be set to a tenant ID if you want to restrict logins.
 
 Render notes:
 
