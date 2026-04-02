@@ -436,8 +436,9 @@ function coerceEvent(payload, eventData = {}) {
   };
 }
 
-function normalizeVendorCategories(vendorCategories, shortlist, selectedCategoryKeys = []) {
-  const selectedSet = new Set(selectedCategoryKeys.map(normalizeCategoryKey));
+function normalizeVendorCategories(vendorCategories, shortlist, selectedCategoryKeys = null) {
+  const hasExplicitSelection = Array.isArray(selectedCategoryKeys);
+  const selectedSet = new Set((selectedCategoryKeys || []).map(normalizeCategoryKey));
   const inputCategories = Array.isArray(vendorCategories) ? vendorCategories : [];
   const derivedCategories = Array.from(
     new Set(
@@ -451,7 +452,7 @@ function normalizeVendorCategories(vendorCategories, shortlist, selectedCategory
       key: normalizeCategoryKey(category.key || category.label),
       label: normalizeText(category.label) || humanizeCategoryLabel(category.key || category.label),
       description: normalizeText(category.description),
-      selected: selectedSet.size > 0 ? selectedSet.has(normalizeCategoryKey(category.key || category.label)) : true
+      selected: hasExplicitSelection ? selectedSet.has(normalizeCategoryKey(category.key || category.label)) : (typeof category.selected === "boolean" ? category.selected : true)
     })),
     ...derivedCategories
       .filter((categoryKey) => !inputCategories.some((item) => normalizeCategoryKey(item.key || item.label) === categoryKey))
@@ -459,11 +460,21 @@ function normalizeVendorCategories(vendorCategories, shortlist, selectedCategory
         key: categoryKey,
         label: humanizeCategoryLabel(categoryKey),
         description: `Recommended ${humanizeCategoryLabel(categoryKey).toLowerCase()} support for this event.`,
-        selected: selectedSet.size > 0 ? selectedSet.has(categoryKey) : true
+        selected: hasExplicitSelection ? selectedSet.has(categoryKey) : true
       }))
   ].filter((category) => category.key);
 
-  return combined.length > 0 ? combined : derivedCategories.map((categoryKey) => ({
+  const deduped = [];
+  const seenKeys = new Set();
+  for (const category of combined) {
+    if (seenKeys.has(category.key)) {
+      continue;
+    }
+    seenKeys.add(category.key);
+    deduped.push(category);
+  }
+
+  return deduped.length > 0 ? deduped : derivedCategories.map((categoryKey) => ({
     key: categoryKey,
     label: humanizeCategoryLabel(categoryKey),
     description: `Recommended ${humanizeCategoryLabel(categoryKey).toLowerCase()} support for this event.`,
@@ -594,21 +605,34 @@ async function buildPlanDocument(payload, user, existingPlan = null) {
   const selectedCategoryKeys = Array.isArray(payload.selectedVendorCategories)
     ? payload.selectedVendorCategories
     : (existingPlan?.vendorCategories || []).filter((item) => item.selected).map((item) => item.key);
+  const existingVendorCategories = Array.isArray(existingPlan?.vendorCategories) ? existingPlan.vendorCategories : [];
 
   if (isAiConfigured()) {
     try {
       const aiResult = await generatePlanWithAi(payload);
       event = coerceEvent(payload, aiResult.event);
-      vendorCategories = normalizeVendorCategories(aiResult.vendorCategories, Array.isArray(aiResult.shortlist) ? aiResult.shortlist : [], selectedCategoryKeys);
+      vendorCategories = normalizeVendorCategories(
+        [...existingVendorCategories, ...(Array.isArray(aiResult.vendorCategories) ? aiResult.vendorCategories : [])],
+        Array.isArray(aiResult.shortlist) ? aiResult.shortlist : [],
+        selectedCategoryKeys
+      );
       shortlist = normalizeShortlist(Array.isArray(aiResult.shortlist) ? aiResult.shortlist : [], event, vendorCategories, replyTo);
     } catch {
       event = buildFallbackEvent(payload);
-      vendorCategories = normalizeVendorCategories(buildFallbackVendorCategories(event), buildFallbackShortlist(event, buildFallbackVendorCategories(event)), selectedCategoryKeys);
+      vendorCategories = normalizeVendorCategories(
+        [...existingVendorCategories, ...buildFallbackVendorCategories(event)],
+        buildFallbackShortlist(event, buildFallbackVendorCategories(event)),
+        selectedCategoryKeys
+      );
       shortlist = buildShortlistFromCatalog(event, vendorCategories, replyTo);
     }
   } else {
     event = buildFallbackEvent(payload);
-    vendorCategories = normalizeVendorCategories(buildFallbackVendorCategories(event), buildFallbackShortlist(event, buildFallbackVendorCategories(event)), selectedCategoryKeys);
+    vendorCategories = normalizeVendorCategories(
+      [...existingVendorCategories, ...buildFallbackVendorCategories(event)],
+      buildFallbackShortlist(event, buildFallbackVendorCategories(event)),
+      selectedCategoryKeys
+    );
     shortlist = buildShortlistFromCatalog(event, vendorCategories, replyTo);
   }
 
@@ -617,7 +641,11 @@ async function buildPlanDocument(payload, user, existingPlan = null) {
       event = buildFallbackEvent(payload);
     }
 
-    vendorCategories = vendorCategories || normalizeVendorCategories(buildFallbackVendorCategories(event), buildFallbackShortlist(event, buildFallbackVendorCategories(event)), selectedCategoryKeys);
+    vendorCategories = vendorCategories || normalizeVendorCategories(
+      [...existingVendorCategories, ...buildFallbackVendorCategories(event)],
+      buildFallbackShortlist(event, buildFallbackVendorCategories(event)),
+      selectedCategoryKeys
+    );
     shortlist = buildShortlistFromCatalog(event, vendorCategories, replyTo);
   }
 
@@ -711,6 +739,39 @@ export async function updatePlan(planId, payload, user) {
 
   const plan = await buildPlanDocument(payload, user, existingPlan);
   return persistPlan(plan);
+}
+
+export async function updatePlanVendorCategories(planId, selectedVendorCategories, userId) {
+  const existingPlan = await getStoredPlan(planId, userId);
+
+  if (!existingPlan) {
+    return null;
+  }
+
+  const selectedSet = new Set(
+    (Array.isArray(selectedVendorCategories) ? selectedVendorCategories : [])
+      .map(normalizeCategoryKey)
+      .filter(Boolean)
+  );
+
+  const vendorCategories = (existingPlan.vendorCategories || []).map((category) => ({
+    ...category,
+    selected: selectedSet.has(normalizeCategoryKey(category.key))
+  }));
+
+  const updatedPlan = {
+    ...existingPlan,
+    updatedAt: new Date().toISOString(),
+    vendorCategories,
+    automation: {
+      ...existingPlan.automation,
+      inquiryEmailsDrafted: (existingPlan.shortlist || []).filter((vendor) =>
+        vendorCategories.some((category) => category.selected && category.key === normalizeCategoryKey(vendor.category))
+      ).length
+    }
+  };
+
+  return persistPlan(updatedPlan);
 }
 
 export async function listAllPlans(userId) {

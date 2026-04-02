@@ -45,6 +45,19 @@ export const appConfig = {
     model: read("AI_MODEL")
   },
   calendar: {
+    auth: {
+      google: {
+        clientId: read("GOOGLE_AUTH_CLIENT_ID"),
+        clientSecret: read("GOOGLE_AUTH_CLIENT_SECRET"),
+        redirectUri: read("GOOGLE_AUTH_REDIRECT_URI")
+      },
+      microsoft: {
+        clientId: read("MICROSOFT_AUTH_CLIENT_ID"),
+        clientSecret: read("MICROSOFT_AUTH_CLIENT_SECRET"),
+        redirectUri: read("MICROSOFT_AUTH_REDIRECT_URI"),
+        tenant: read("MICROSOFT_AUTH_TENANT", "common")
+      }
+    },
     google: {
       clientId: read("GOOGLE_OAUTH_CLIENT_ID"),
       clientSecret: read("GOOGLE_OAUTH_CLIENT_SECRET"),
@@ -85,6 +98,14 @@ export function getConfigStatus() {
       configured: Boolean(appConfig.ai.apiKey)
     },
     calendar: {
+      auth: {
+        google: {
+          configured: Boolean(appConfig.calendar.auth.google.clientId && appConfig.calendar.auth.google.clientSecret && appConfig.calendar.auth.google.redirectUri)
+        },
+        microsoft: {
+          configured: Boolean(appConfig.calendar.auth.microsoft.clientId && appConfig.calendar.auth.microsoft.clientSecret && appConfig.calendar.auth.microsoft.redirectUri)
+        }
+      },
       google: {
         configured: Boolean(appConfig.calendar.google.clientId && appConfig.calendar.google.clientSecret && appConfig.calendar.google.redirectUri)
       },

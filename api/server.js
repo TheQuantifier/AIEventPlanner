@@ -13,7 +13,9 @@ import {
 import {
   confirmAccountDeletion,
   confirmPasswordChange,
+  createOAuthAuthUrl,
   createSessionForCredentials,
+  createSessionForOAuthCallback,
   getUserFromToken,
   registerUser,
   requestAccountDeletionVerification,
@@ -23,7 +25,7 @@ import {
   revokeSession,
   updateUserProfile
 } from "./src/auth.js";
-import { validateMailgunSignature, validateWebhookToken } from "./src/email-client.js";
+import { sendEmail, validateMailgunSignature, validateWebhookToken } from "./src/email-client.js";
 import {
   analyzeIntake,
   createPlan,
@@ -34,7 +36,8 @@ import {
   removePlan,
   sendPlanInquiries,
   setPlanPaused,
-  updatePlan
+  updatePlan,
+  updatePlanVendorCategories
 } from "./src/planner.js";
 
 const PORT = Number(process.env.PORT || 4000);
@@ -164,6 +167,62 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, session.error ? 401 : 200, session);
     }
 
+    if (request.method === "POST" && path.startsWith("/api/auth/oauth/")) {
+      const provider = path.replace("/api/auth/oauth/", "");
+      const authUrl = await createOAuthAuthUrl(provider);
+      return sendJson(response, 200, { url: authUrl });
+    }
+
+    if (request.method === "GET" && path.startsWith("/api/auth/callback/")) {
+      const provider = path.replace("/api/auth/callback/", "");
+      const code = url.searchParams.get("code") || "";
+      const state = url.searchParams.get("state") || "";
+      const error = url.searchParams.get("error");
+      const redirectBase = appConfig.app.webBaseUrl || appConfig.app.baseUrl || "";
+
+      if (!redirectBase) {
+        return sendJson(response, 500, { error: "WEB_BASE_URL or APP_BASE_URL must be configured for OAuth sign-in" });
+      }
+
+      const redirectUrl = new URL(redirectBase.replace(/\/+$/, "") + "/login");
+
+      if (error) {
+        redirectUrl.searchParams.set("oauthError", error);
+        return sendHtml(
+          response,
+          400,
+          `<html><head><meta http-equiv="refresh" content="0; url=${redirectUrl.toString()}" /></head><body>Sign-in failed. You can close this window.</body></html>`
+        );
+      }
+
+      if (!code || !state) {
+        redirectUrl.searchParams.set("oauthError", "missing_authorization_details");
+        return sendHtml(
+          response,
+          400,
+          `<html><head><meta http-equiv="refresh" content="0; url=${redirectUrl.toString()}" /></head><body>Missing authorization details.</body></html>`
+        );
+      }
+
+      try {
+        const session = await createSessionForOAuthCallback({ provider, code, state });
+        redirectUrl.searchParams.set("oauth", "success");
+        redirectUrl.searchParams.set("token", session.token);
+        return sendHtml(
+          response,
+          200,
+          `<html><head><meta http-equiv="refresh" content="0; url=${redirectUrl.toString()}" /></head><body>Sign-in complete. You can close this window.</body></html>`
+        );
+      } catch (callbackError) {
+        redirectUrl.searchParams.set("oauthError", callbackError instanceof Error ? callbackError.message : String(callbackError));
+        return sendHtml(
+          response,
+          400,
+          `<html><head><meta http-equiv="refresh" content="0; url=${redirectUrl.toString()}" /></head><body>Sign-in failed. You can close this window.</body></html>`
+        );
+      }
+    }
+
     if (request.method === "GET" && path === "/api/auth/me") {
       const user = await getUserFromToken(extractBearerToken(request));
       return sendJson(response, user ? 200 : 401, user ? { user } : { error: "Unauthorized" });
@@ -184,6 +243,34 @@ const server = http.createServer(async (request, response) => {
       const payload = await readJsonBody(request);
       const result = await resetPassword(payload);
       return sendJson(response, result.error ? 400 : 200, result);
+    }
+
+    if (request.method === "POST" && path === "/api/public/contact") {
+      const payload = await readJsonBody(request);
+      const message = String(payload.message || "").trim();
+      const email = String(payload.email || "").trim();
+
+      if (!message) {
+        return sendJson(response, 400, { error: "Message is required" });
+      }
+
+      const result = await sendEmail({
+        to: "jhandalex100@gmail.com",
+        subject: "AI Event Planner contact form",
+        text: [
+          "New contact form message:",
+          "",
+          email ? `From: ${email}` : "From: not provided",
+          "",
+          message
+        ].join("\n"),
+        replyTo: email || undefined,
+        fromName: "AI Event Planner Contact",
+        fromEmail: appConfig.emailClient.senderEmail || undefined,
+        tags: ["contact-form"]
+      });
+
+      return sendJson(response, result.ok ? 200 : 400, result.ok ? { ok: true } : { error: result.reason || "Unable to send message" });
     }
 
     if (path.startsWith("/api/") && !path.startsWith("/api/auth/") && path !== "/api/webhooks/mailgun/inbound" && !path.startsWith("/api/calendar/callback") && !currentUser) {
@@ -309,6 +396,18 @@ const server = http.createServer(async (request, response) => {
       const planId = path.replace("/api/plans/", "");
       const payload = await readJsonBody(request);
       const plan = await updatePlan(planId, payload, currentUser);
+
+      if (!plan) {
+        return sendJson(response, 404, { error: "Plan not found" });
+      }
+
+      return sendJson(response, 200, plan);
+    }
+
+    if (request.method === "PATCH" && path.endsWith("/vendor-categories")) {
+      const [, , , planId] = path.split("/");
+      const payload = await readJsonBody(request);
+      const plan = await updatePlanVendorCategories(planId, payload.selectedVendorCategories, currentUser.id);
 
       if (!plan) {
         return sendJson(response, 404, { error: "Plan not found" });

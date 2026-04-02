@@ -35,6 +35,11 @@ const emptyDeleteSettingsForm = {
   code: ""
 };
 
+const emptyContactForm = {
+  email: "",
+  message: ""
+};
+
 const emptyCalendarEventForm = {
   title: "Event hold",
   start: "",
@@ -51,8 +56,87 @@ const publicPagePaths = {
   login: "/login",
   register: "/register",
   forgot: "/forgot-password",
-  reset: "/reset-password"
+  reset: "/reset-password",
+  privacy: "/privacy",
+  terms: "/terms",
+  pricing: "/pricing"
 };
+
+const privacySections = [
+  {
+    heading: "Information we collect",
+    paragraphs: [
+      "AI Event Planner collects the information you provide directly to us, including account details such as your name, email address, organization, login credentials, and profile settings.",
+      "We also collect the event-planning information you enter into the app, such as event briefs, budgets, dates, guest counts, vendor selections, outreach content, and related planning notes."
+    ]
+  },
+  {
+    heading: "How we use information",
+    paragraphs: [
+      "We use your information to operate the service, create and manage your account, generate event-planning recommendations, send planning-related communications, provide customer support, and maintain the security of the platform.",
+      "If you connect third-party calendar services such as Google Calendar, we use the granted access only to show availability, create or update holds you request, and support the calendar workflows available inside the app."
+    ]
+  },
+  {
+    heading: "Sharing and service providers",
+    paragraphs: [
+      "We may share information with service providers that help us host the app, process email, support authentication, and run core infrastructure on our behalf. Those providers may access information only as needed to perform those services.",
+      "We do not sell your personal information. We may disclose information if required by law, to enforce our terms, or to protect the rights, safety, and security of our users or the service."
+    ]
+  },
+  {
+    heading: "Data retention and security",
+    paragraphs: [
+      "We retain information for as long as needed to provide the service, comply with legal obligations, resolve disputes, and enforce agreements. You may request account deletion through the settings tools provided in the app.",
+      "We use reasonable administrative, technical, and organizational measures to protect information, but no system can guarantee absolute security."
+    ]
+  },
+  {
+    heading: "Your choices",
+    paragraphs: [
+      "You may update profile information inside your account, disconnect linked calendar providers, or request account deletion. If you no longer want us to process your data for service use, you should stop using the service and delete your account.",
+      "Questions about this policy can be directed to the contact email address you publish for your app or business operations."
+    ]
+  }
+];
+
+const termsSections = [
+  {
+    heading: "Use of the service",
+    paragraphs: [
+      "AI Event Planner provides software tools to help users organize events, research vendor options, draft outreach, and manage planning workflows. You may use the service only in compliance with applicable law and these terms.",
+      "You are responsible for the accuracy of the information you submit, the actions you take based on app outputs, and the communications you send through or with the help of the service."
+    ]
+  },
+  {
+    heading: "Accounts and access",
+    paragraphs: [
+      "You are responsible for maintaining the confidentiality of your account credentials and for all activity that occurs under your account. You must notify the service operator promptly if you believe your account has been accessed without authorization.",
+      "We may suspend or terminate access if we reasonably believe your use violates these terms, creates security risk, or harms the service or other users."
+    ]
+  },
+  {
+    heading: "Third-party services",
+    paragraphs: [
+      "The service may integrate with third-party products, including calendar providers and email-related services. Your use of those third-party services is subject to their own terms and privacy policies.",
+      "We are not responsible for third-party systems, downtime, or policy changes, even when those services are connected to the app."
+    ]
+  },
+  {
+    heading: "Disclaimers",
+    paragraphs: [
+      "The service is provided on an as-is and as-available basis. Planning suggestions, vendor matches, timelines, and generated content are provided for convenience and should be reviewed by you before use.",
+      "To the maximum extent permitted by law, we disclaim warranties of merchantability, fitness for a particular purpose, non-infringement, and uninterrupted or error-free operation."
+    ]
+  },
+  {
+    heading: "Liability and updates",
+    paragraphs: [
+      "To the maximum extent permitted by law, the service operator will not be liable for indirect, incidental, special, consequential, or punitive damages, or for loss of profits, revenue, data, or business opportunities arising from your use of the service.",
+      "We may update these terms from time to time. Continued use of the service after an update becomes effective constitutes acceptance of the revised terms."
+    ]
+  }
+];
 
 function currency(value) {
   return new Intl.NumberFormat("en-US", {
@@ -247,6 +331,62 @@ function buildEditorIntakeFromPlan(plan, assistantMessage = "Recommendations ref
   };
 }
 
+function inferLocalEventType(brief) {
+  const text = String(brief || "").trim().toLowerCase();
+
+  if (text.includes("wedding")) return "wedding";
+  if (text.includes("birthday")) return "birthday";
+  if (text.includes("fundraiser")) return "fundraiser";
+  if (text.includes("retreat")) return "retreat";
+  if (text.includes("launch")) return "product-launch";
+  if (text.includes("corporate") || text.includes("team")) return "corporate";
+  if (text.includes("anniversary")) return "anniversary";
+  if (text.includes("baby shower")) return "baby-shower";
+  if (text.includes("conference")) return "conference";
+  if (text.includes("graduation")) return "graduation";
+
+  return "custom-event";
+}
+
+function buildLocalIntake(payload) {
+  const normalized = {
+    brief: String(payload?.brief || "").trim(),
+    budget: String(payload?.budget || "").trim(),
+    location: String(payload?.location || "").trim(),
+    dates: String(payload?.dates || "").trim(),
+    guestCount: String(payload?.guestCount || "").trim(),
+    theme: String(payload?.theme || "").trim()
+  };
+  const eventType = inferLocalEventType(normalized.brief);
+  const missingFields = [
+    ["brief", "What kind of event are you planning?"],
+    ["budget", "What budget range should I design around?"],
+    ["location", "Which city or area should I focus on?"],
+    ["dates", "What dates are you considering, or are they flexible?"],
+    ["guestCount", "How many guests should I plan for?"]
+  ]
+    .filter(([field]) => !normalized[field])
+    .map(([field, question]) => ({ field, question }));
+
+  return {
+    eventType,
+    readiness: missingFields.length === 0 ? "ready-for-research" : "needs-more-detail",
+    missingFields: missingFields.map((item) => item.field),
+    followUpQuestions: missingFields,
+    suggestions: missingFields.length === 0
+      ? [
+          normalized.theme ? `Theme noted: ${normalized.theme}` : "Theme is optional, but adding one can sharpen recommendations.",
+          "Save to let the AI review the brief and refine the event direction."
+        ]
+      : [
+          "Fill in the missing basics first so the AI can give better planning guidance immediately."
+        ],
+    assistantMessage: missingFields.length === 0
+      ? "The basics are covered. Save in the workspace for an AI pass and a more specific event direction."
+      : "Before the AI reviews this event, fill in the missing basics below."
+  };
+}
+
 function buildPlanSummary(plan) {
   return [
     ["Event", plan.event.type],
@@ -310,6 +450,12 @@ function getPublicPageFromLocation() {
       return "register";
     case publicPagePaths.forgot:
       return "forgot";
+    case publicPagePaths.privacy:
+      return "privacy";
+    case publicPagePaths.terms:
+      return "terms";
+    case publicPagePaths.pricing:
+      return "pricing";
     default:
       return "landing";
   }
@@ -317,6 +463,289 @@ function getPublicPageFromLocation() {
 
 function getAuthModeFromPublicPage(page) {
   return ["login", "register", "forgot", "reset"].includes(page) ? page : "login";
+}
+
+function getOAuthResultFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    token: params.get("token") || "",
+    error: params.get("oauthError") || "",
+    success: params.get("oauth") === "success"
+  };
+}
+
+function PublicLegalLinks({ onNavigate, compact = false }) {
+  return (
+    <nav className={`public-legal-links ${compact ? "compact" : ""}`} aria-label="Legal">
+      <button type="button" className="text-link" onClick={() => onNavigate("privacy")}>Privacy Policy</button>
+      <button type="button" className="text-link" onClick={() => onNavigate("terms")}>Terms of Use</button>
+    </nav>
+  );
+}
+
+function FooterLinks({ onNavigate, onContact }) {
+  return (
+    <nav className="public-legal-links" aria-label="Footer">
+      <button type="button" className="text-link" onClick={() => onNavigate("pricing")}>Pricing</button>
+      <button type="button" className="text-link" onClick={() => onNavigate("privacy")}>Privacy Policy</button>
+      <button type="button" className="text-link" onClick={() => onNavigate("terms")}>Terms of Use</button>
+      <button type="button" className="text-link" onClick={onContact}>Contact us</button>
+    </nav>
+  );
+}
+
+function PricingPage({ onOpenContactModal }) {
+  const featureRows = [
+    {
+      label: "Price",
+      values: ["$0.00/month", "$15.00/month", "Special*"]
+    },
+    {
+      label: "Event size",
+      values: ["Small to mid-size events", "Small to mid-size events", "Small events and large productions"]
+    },
+    {
+      label: "AI plan creation",
+      values: ["Included", "Included", "Included"]
+    },
+    {
+      label: "Vendor search",
+      values: ["Included", "Included", "Included"]
+    },
+    {
+      label: "Automated vendor\ncommunications",
+      values: ["3 full events with automated outreach, then draft-only support", "Unlimited", "Unlimited"]
+    },
+    {
+      label: "Automated price\nnegotiations",
+      values: ["1 full event with automated negotiation", "Unlimited", "Unlimited"]
+    },
+    {
+      label: "Best fit",
+      values: ["Birthdays, dinners, showers, and casual gatherings", "Independent planners and repeat event hosts", "Weddings, corporate outings, retreats, and high-touch event operations"]
+    }
+  ];
+
+  const plans = [
+    {
+      name: "Free",
+      kicker: "No payment information needed",
+      description: "Start planning right away and run your first event through the full workflow."
+    },
+    {
+      name: "Pro",
+      kicker: "For active planners",
+      description: "Unlock unlimited vendor outreach and negotiations for ongoing event work."
+    },
+    {
+      name: "Business",
+      kicker: "For high-touch events",
+      description: "Everything in Pro, expanded for both small events and large-format productions."
+    }
+  ];
+
+  return (
+    <section className="pricing-page">
+      <section className="panel pricing-hero">
+        <p className="section-kicker">Pricing</p>
+        <h2>Choose the plan that fits how you plan.</h2>
+        <p className="landing-lead">Start free, explore the full event-planning flow, and scale into unlimited outreach and negotiation when you need more.</p>
+      </section>
+
+      <section className="pricing-grid">
+        {plans.map((plan) => (
+          <article key={plan.name} className="panel pricing-plan-card">
+            <p className="section-kicker">{plan.kicker}</p>
+            <h3>{plan.name}</h3>
+            <p className="fine-print">{plan.description}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="panel pricing-compare">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Plan comparison</p>
+            <h3>What changes as you grow</h3>
+          </div>
+        </div>
+        <div className="pricing-table" role="table" aria-label="Pricing comparison">
+          <div className="pricing-row pricing-row-head" role="row">
+            <div className="pricing-cell pricing-feature-cell" role="columnheader">Feature</div>
+            <div className="pricing-cell" role="columnheader">Free</div>
+            <div className="pricing-cell" role="columnheader">Pro</div>
+            <div className="pricing-cell" role="columnheader">Business</div>
+          </div>
+          {featureRows.map((row) => (
+            <div key={row.label} className={`pricing-row ${row.label === "Event size" ? "pricing-row-section-start" : ""}`} role="row">
+              <div className="pricing-cell pricing-feature-cell" role="rowheader">{row.label.split("\n").map((part) => <span key={part}>{part}</span>)}</div>
+              {row.values.map((value, valueIndex) => (
+                <div key={`${row.label}-${valueIndex}`} className="pricing-cell" role="cell">
+                  <span className="pricing-cell-text">
+                    {row.label === "Price\n(per month)" && valueIndex === 2 ? (
+                      <>
+                        Special<sup className="pricing-asterisk">*</sup>
+                      </>
+                    ) : (row.label === "Automated vendor\ncommunications" || row.label === "Automatic price\nnegotiations") && valueIndex === 0 ? (
+                      <>
+                        {value}
+                        <sup className="pricing-asterisk">**</sup>
+                      </>
+                    ) : (
+                      value
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+        <p className="fine-print pricing-footnote">
+          <span className="pricing-asterisk">*</span> Business pricing depends on the business or entity and can be negotiable.
+          {" "}To get more information or setup a meeting to discuss pricing,{" "}
+          <button type="button" className="text-link inline-text-link" onClick={onOpenContactModal}>contact us</button>.
+        </p>
+        <p className="fine-print pricing-footnote">
+          <span className="pricing-asterisk">**</span> An event is considered locked in once <strong>See vendors</strong> is selected.
+          You can cancel and still use your 1 free event vendor outreach and negotiation access on other events before pressing <strong>See vendors</strong>.
+        </p>
+      </section>
+    </section>
+  );
+}
+
+function LegalPage({ title, summary, sections, onNavigate }) {
+  return (
+    <section className="legal-page panel">
+      <p className="section-kicker">Legal</p>
+      <h2>{title}</h2>
+      <p className="fine-print legal-summary">{summary}</p>
+      <div className="legal-sections">
+        {sections.map((section) => (
+          <section key={section.heading} className="legal-section">
+            <h3>{section.heading}</h3>
+            {section.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+          </section>
+        ))}
+      </div>
+      <PublicLegalLinks onNavigate={onNavigate} compact />
+    </section>
+  );
+}
+
+function ConsentModal({ documentKey, onAgree, onDisagree }) {
+  const isPrivacy = documentKey === "privacy";
+  const title = isPrivacy ? "Privacy Policy" : "Terms of Use";
+  const summary = isPrivacy
+    ? "Review and accept the Privacy Policy to continue registration."
+    : "Review and accept the Terms of Use to continue registration.";
+  const sections = isPrivacy ? privacySections : termsSections;
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div className="modal-panel panel" role="dialog" aria-modal="true" aria-labelledby="consent-modal-title">
+        <p className="section-kicker">Registration Consent</p>
+        <h2 id="consent-modal-title">{title}</h2>
+        <p className="fine-print legal-summary">{summary}</p>
+        <div className="legal-sections modal-legal-sections">
+          {sections.map((section) => (
+            <section key={section.heading} className="legal-section">
+              <h3>{section.heading}</h3>
+              {section.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+            </section>
+          ))}
+        </div>
+        <div className="action-row modal-actions">
+          <button type="button" className="secondary" onClick={onDisagree}>I disagree</button>
+          <button type="button" onClick={onAgree}>I agree</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ContactModal({ formData, busy, message, onChange, onClose, onSubmit }) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div className="modal-panel panel contact-modal-panel" role="dialog" aria-modal="true" aria-labelledby="contact-modal-title">
+        <p className="section-kicker">Contact</p>
+        <h2 id="contact-modal-title">Contact us</h2>
+        <p className="fine-print">Send a message and we will route it to the team.</p>
+        {message ? <p className="fine-print">{message}</p> : null}
+        <form className="planner-form" onSubmit={onSubmit}>
+          <label className="field">
+            <span>Email</span>
+            <input name="email" value={formData.email} onChange={onChange} placeholder="you@example.com" autoComplete="email" />
+          </label>
+          <label className="field">
+            <span>Message</span>
+            <textarea name="message" value={formData.message} onChange={onChange} placeholder="How can we help?" />
+          </label>
+          <div className="action-row modal-actions">
+            <button type="button" className="secondary" onClick={onClose} disabled={busy}>Close</button>
+            <button type="submit" disabled={busy || !formData.message.trim()}>{busy ? "Sending..." : "Send message"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function PasswordField({ name, value, onChange, placeholder, autoComplete, visible, onToggle }) {
+  return (
+    <label className="field">
+      <span>Password</span>
+      <div className="password-field-wrap">
+        <input
+          name={name}
+          type={visible ? "text" : "password"}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          autoComplete={autoComplete}
+        />
+        <button
+          type="button"
+          className="password-toggle"
+          onClick={onToggle}
+          aria-label={visible ? "Hide password" : "Show password"}
+          aria-pressed={visible}
+        >
+          {visible ? (
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path
+                d="M3 3 21 21M10.6 10.7a2 2 0 0 0 2.7 2.7M9.9 5.2A10.9 10.9 0 0 1 12 5c5.3 0 9.3 4.1 10 7-.3 1.2-1.2 2.8-2.6 4.2M14.1 18.8c-.7.1-1.4.2-2.1.2-5.3 0-9.3-4.1-10-7 .4-1.7 1.9-4.2 4.4-5.8M12 9.5A2.5 2.5 0 0 1 14.5 12"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path
+                d="M2 12c.7-2.9 4.7-7 10-7s9.3 4.1 10 7c-.7 2.9-4.7 7-10 7S2.7 14.9 2 12Z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle
+                cx="12"
+                cy="12"
+                r="2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              />
+            </svg>
+          )}
+        </button>
+      </div>
+    </label>
+  );
 }
 
 function buildInquiryPreview(event, vendor) {
@@ -473,14 +902,14 @@ function SharedComposer({
           </div>
         </div>
         <div className="action-row">
-          <button type="submit" disabled={(mode === "home" ? analyzing : savingPlan) || !formData.brief.trim()}>
-            {mode === "home" ? (analyzing ? "Analyzing..." : "Get ideas") : (savingPlan ? "Saving..." : "Save updates")}
+          <button type="submit" disabled={(mode === "home" ? analyzing : (savingPlan || analyzing)) || !formData.brief.trim()}>
+            {mode === "home" ? (analyzing ? "Analyzing..." : "Get ideas") : (savingPlan ? "Saving..." : analyzing ? "Analyzing..." : "Save updates")}
           </button>
           {mode === "workspace" && editingPlanId ? (
-            <button type="button" className="secondary" onClick={onResetEdit}>Cancel edit</button>
+            <button type="button" className="secondary" onClick={onResetEdit} disabled={savingPlan || analyzing}>Cancel edit</button>
           ) : null}
-          {mode === "workspace" && intake?.readiness === "ready-for-research" ? (
-            <button type="button" className="secondary" disabled={savingPlan} onClick={onAdvance}>
+          {mode === "workspace" && currentPlan && intake?.readiness === "ready-for-research" ? (
+            <button type="button" className="secondary" disabled={savingPlan || analyzing} onClick={onAdvance}>
               Continue to plan
             </button>
           ) : null}
@@ -496,10 +925,23 @@ function SharedComposer({
   );
 }
 
-function IntakeSection({ intake }) {
+function IntakeSection({ intake, analyzing }) {
   return (
     <>
-      {intake ? (
+      {analyzing ? (
+        <section className="panel">
+          <h2>Next details</h2>
+          <div className="follow-up-list">
+            <div className="follow-up-item thinking-state">
+              <strong>
+                Thinking<span className="loading-dots" aria-hidden="true">...</span>
+              </strong>
+              <br />
+              Generating intake guidance from your event brief.
+            </div>
+          </div>
+        </section>
+      ) : intake ? (
         <section className="panel">
           <h2>Next details</h2>
           <div className="follow-up-list">
@@ -765,7 +1207,7 @@ function AccountPanel({
             <p className="fine-print">We will email a temporary verification code to {user.email} before applying the new password.</p>
             <label className="field">
               <span>New password</span>
-              <input name="newPassword" type="password" value={passwordForm.newPassword} onChange={onPasswordChange} placeholder="12+ chars, upper, lower, number, symbol" />
+              <input name="newPassword" type="password" value={passwordForm.newPassword} onChange={onPasswordChange} placeholder="8+ chars, upper, lower, number, symbol" />
             </label>
             <label className="field">
               <span>Verification code</span>
@@ -816,6 +1258,14 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
+  const [contactModalOpen, setContactModalOpen] = useState(false);
+  const [contactForm, setContactForm] = useState(emptyContactForm);
+  const [contactBusy, setContactBusy] = useState(false);
+  const [contactMessage, setContactMessage] = useState("");
+  const [authPasswordVisible, setAuthPasswordVisible] = useState(false);
+  const [registerConsentAccepted, setRegisterConsentAccepted] = useState(false);
+  const [consentModalStep, setConsentModalStep] = useState("");
+  const [consentPreviewMode, setConsentPreviewMode] = useState(false);
   const [dashboardPlans, setDashboardPlans] = useState([]);
   const [formData, setFormData] = useState(emptyForm);
   const [intake, setIntake] = useState(null);
@@ -827,7 +1277,6 @@ export default function App() {
   const [categorySaving, setCategorySaving] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [currentPage, setCurrentPage] = useState("home");
-  const [isPageTransitioning, setIsPageTransitioning] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [profileForm, setProfileForm] = useState(emptyProfileForm);
   const [profileSaving, setProfileSaving] = useState(false);
@@ -857,10 +1306,30 @@ export default function App() {
   const [calendarEventMessage, setCalendarEventMessage] = useState("");
   const [lastCalendarEventId, setLastCalendarEventId] = useState("");
   const accountMenuRef = useRef(null);
+  const analyzeRequestIdRef = useRef(0);
+  const saveRequestIdRef = useRef(0);
+
+  function finalizeAuthSession(token, nextUser) {
+    window.localStorage.setItem(authStorageKey, token);
+    setSessionToken(token);
+    setUser(nextUser);
+    setAuthForm(emptyAuthForm);
+    setDashboardPlans([]);
+    setCurrentPlan(null);
+    setEditingPlanId(null);
+    setCurrentPage("home");
+    setPublicPage("landing");
+    setAuthMode("login");
+    setAuthMessage("");
+    if (window.location.pathname !== publicPagePaths.landing || window.location.search) {
+      window.history.replaceState({}, "", publicPagePaths.landing);
+    }
+  }
 
   useEffect(() => {
     const resetToken = new URLSearchParams(window.location.search).get("resetToken");
     const nextPublicPage = getPublicPageFromLocation();
+    const oauthResult = getOAuthResultFromLocation();
     const storedToken = window.localStorage.getItem(authStorageKey) || "";
 
     setPublicPage(nextPublicPage);
@@ -868,6 +1337,27 @@ export default function App() {
 
     if (resetToken || nextPublicPage === "reset") {
       setAuthForm((current) => ({ ...current, token: resetToken }));
+    }
+
+    if (oauthResult.error) {
+      setAuthMessage(oauthResult.error);
+      const nextUrl = window.location.pathname;
+      window.history.replaceState({}, "", nextUrl);
+    }
+
+    if (oauthResult.token) {
+      setSessionToken(oauthResult.token);
+      loadCurrentUser(oauthResult.token)
+        .then((nextUser) => {
+          if (nextUser) {
+            finalizeAuthSession(oauthResult.token, nextUser);
+          } else {
+            setAuthMessage("OAuth sign-in completed, but the session could not be loaded.");
+            window.history.replaceState({}, "", window.location.pathname);
+          }
+        })
+        .finally(() => setAuthLoading(false));
+      return;
     }
 
     if (!storedToken) {
@@ -882,9 +1372,10 @@ export default function App() {
   useEffect(() => {
     function handlePopState() {
       const nextPublicPage = getPublicPageFromLocation();
+      const oauthResult = getOAuthResultFromLocation();
       setPublicPage(nextPublicPage);
       setAuthMode(getAuthModeFromPublicPage(nextPublicPage));
-      setAuthMessage("");
+      setAuthMessage(oauthResult.error || "");
     }
 
     window.addEventListener("popstate", handlePopState);
@@ -978,6 +1469,13 @@ export default function App() {
     setFormData(emptyForm);
     setAuthForm(emptyAuthForm);
     setAuthMessage("");
+    setContactModalOpen(false);
+    setContactForm(emptyContactForm);
+    setContactMessage("");
+    setAuthPasswordVisible(false);
+    setRegisterConsentAccepted(false);
+    setConsentModalStep("");
+    setConsentPreviewMode(false);
     setPublicPage("landing");
     setAuthMode("login");
     setCurrentPage("home");
@@ -1001,6 +1499,12 @@ export default function App() {
     setPublicPage(page);
     setAuthMode(getAuthModeFromPublicPage(page));
     setAuthMessage("");
+    setAuthPasswordVisible(false);
+    setConsentModalStep("");
+    setConsentPreviewMode(false);
+    if (page !== "register") {
+      setRegisterConsentAccepted(false);
+    }
   }
 
   function authHeaders(extra = {}) {
@@ -1099,6 +1603,11 @@ export default function App() {
         return;
       }
 
+      if (authMode === "register" && !registerConsentAccepted) {
+        setAuthMessage("You must agree to the Privacy Policy and Terms of Use before creating an account.");
+        return;
+      }
+
       const payload = await requestJson(
         `${apiBaseUrl}/api/auth/${authMode === "login" ? "login" : "register"}`,
         {
@@ -1113,22 +1622,121 @@ export default function App() {
         authMode === "login" ? "Failed to sign in" : "Failed to create account"
       );
 
-      window.localStorage.setItem(authStorageKey, payload.token);
-      setSessionToken(payload.token);
-      setUser(payload.user);
-      setAuthForm(emptyAuthForm);
-      setDashboardPlans([]);
-      setCurrentPlan(null);
-      setEditingPlanId(null);
-      setCurrentPage("home");
-      if (window.location.pathname !== publicPagePaths.landing || window.location.search) {
-        window.history.replaceState({}, "", publicPagePaths.landing);
-      }
+      finalizeAuthSession(payload.token, payload.user);
     } catch (error) {
       alert(error.message);
     } finally {
       setAuthBusy(false);
     }
+  }
+
+  async function handleOAuthSignIn(provider) {
+    setAuthBusy(true);
+    setAuthMessage("");
+
+    try {
+      const payload = await requestJson(
+        `${apiBaseUrl}/api/auth/oauth/${provider}`,
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+        "Failed to start provider sign-in"
+      );
+
+      if (payload.url) {
+        window.location.href = payload.url;
+        return;
+      }
+
+      setAuthMessage("Provider sign-in URL was not returned.");
+    } catch (error) {
+      setAuthMessage(error.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  function handleOpenContactModal() {
+    setContactModalOpen(true);
+    setContactMessage("");
+  }
+
+  function handleCloseContactModal() {
+    if (contactBusy) return;
+    setContactModalOpen(false);
+    setContactForm(emptyContactForm);
+    setContactMessage("");
+  }
+
+  function handleContactFieldChange(event) {
+    const { name, value } = event.target;
+    setContactForm((current) => ({ ...current, [name]: value }));
+    setContactMessage("");
+  }
+
+  async function handleContactSubmit(event) {
+    event.preventDefault();
+    setContactBusy(true);
+    setContactMessage("");
+
+    try {
+      await requestJson(
+        `${apiBaseUrl}/api/public/contact`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(contactForm)
+        },
+        "Failed to send message"
+      );
+      setContactMessage("Message sent.");
+      setContactForm(emptyContactForm);
+    } catch (error) {
+      setContactMessage(error.message);
+    } finally {
+      setContactBusy(false);
+    }
+  }
+
+  function handleRegisterConsentToggle() {
+    if (registerConsentAccepted) {
+      setRegisterConsentAccepted(false);
+      setConsentModalStep("");
+      setConsentPreviewMode(false);
+      return;
+    }
+
+    setConsentPreviewMode(false);
+    setConsentModalStep("privacy");
+  }
+
+  function handleConsentAgree() {
+    if (consentPreviewMode) {
+      setConsentModalStep("");
+      setConsentPreviewMode(false);
+      return;
+    }
+
+    if (consentModalStep === "privacy") {
+      setConsentModalStep("terms");
+      return;
+    }
+
+    if (consentModalStep === "terms") {
+      setRegisterConsentAccepted(true);
+      setConsentModalStep("");
+      setConsentPreviewMode(false);
+      setAuthMessage("");
+    }
+  }
+
+  function handleConsentDisagree() {
+    setRegisterConsentAccepted(false);
+    setConsentModalStep("");
+    setConsentPreviewMode(false);
+  }
+
+  function handleOpenConsentDocument(documentKey) {
+    setConsentPreviewMode(true);
+    setConsentModalStep(documentKey);
   }
 
   async function handleLogout() {
@@ -1418,37 +2026,15 @@ export default function App() {
     setAccountMenuOpen(false);
   }
 
-  async function handleAnalyze(event, nextPage = currentPage) {
-    event.preventDefault();
-    setAnalyzing(true);
-    try {
-      const nextIntake = await requestJson(`${apiBaseUrl}/api/intake`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(formData) }, "The API could not analyze the event.");
-      setIntake(nextIntake);
-      if (!editingPlanId) {
-        setCurrentPlan(null);
-      }
-      if (currentPage === "home" && nextPage === "workspace") {
-        setIsPageTransitioning(true);
-        window.setTimeout(() => {
-          setCurrentPage("workspace");
-          setActiveStep(0);
-          setIsPageTransitioning(false);
-        }, 760);
-      } else {
-        setCurrentPage(nextPage);
-        setActiveStep(0);
-      }
-    } catch (error) {
-      alert(error.message);
-    } finally {
-      setAnalyzing(false);
-    }
-  }
-
   async function handleContinue() {
     setSavingPlan(true);
+    const requestId = saveRequestIdRef.current + 1;
+    saveRequestIdRef.current = requestId;
     try {
       const plan = await requestJson(`${apiBaseUrl}/api/plans${editingPlanId ? `/${editingPlanId}` : ""}`, { method: editingPlanId ? "PUT" : "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(formData) }, "The API could not generate a plan.");
+      if (saveRequestIdRef.current !== requestId) {
+        return;
+      }
       setCurrentPlan(plan);
       setEditingPlanId(plan.id);
       setFormData(eventFormFromPlan(plan));
@@ -1463,15 +2049,49 @@ export default function App() {
       upsertPlan(plan);
       setActiveStep(1);
     } catch (error) {
+      if (saveRequestIdRef.current !== requestId) {
+        return;
+      }
       alert(error.message);
     } finally {
-      setSavingPlan(false);
+      if (saveRequestIdRef.current === requestId) {
+        setSavingPlan(false);
+      }
     }
   }
 
   async function handleSavePlan(event) {
     event?.preventDefault();
-    await handleContinue();
+    setActiveStep(0);
+    setAnalyzing(true);
+    const requestId = analyzeRequestIdRef.current + 1;
+    analyzeRequestIdRef.current = requestId;
+
+    try {
+      const nextIntake = await requestJson(
+        `${apiBaseUrl}/api/intake`,
+        { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(formData) },
+        "The API could not analyze the event."
+      );
+      if (analyzeRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setIntake(nextIntake);
+
+      if (nextIntake.readiness === "ready-for-research") {
+        await handleContinue();
+      }
+    } catch (error) {
+      if (analyzeRequestIdRef.current !== requestId) {
+        return;
+      }
+      alert(error.message);
+    } finally {
+      if (analyzeRequestIdRef.current === requestId) {
+        setAnalyzing(false);
+      }
+    }
   }
 
   function handleResetEdit() {
@@ -1481,7 +2101,6 @@ export default function App() {
     setFormData(emptyForm);
     setActiveStep(0);
     setCurrentPage("home");
-    setIsPageTransitioning(false);
   }
 
   function handleEditPlan(plan) {
@@ -1534,16 +2153,26 @@ export default function App() {
       category.key === categoryKey ? { ...category, selected } : category
     );
     const selectedVendorCategories = nextCategories.filter((category) => category.selected).map((category) => category.key);
+    const previousPlan = currentPlan;
+
+    setCurrentPlan((current) => (
+      current
+        ? { ...current, vendorCategories: nextCategories }
+        : current
+    ));
+    upsertPlan({
+      ...currentPlan,
+      vendorCategories: nextCategories
+    });
 
     setCategorySaving(true);
     try {
       const updatedPlan = await requestJson(
-        `${apiBaseUrl}/api/plans/${currentPlan.id}`,
+        `${apiBaseUrl}/api/plans/${currentPlan.id}/vendor-categories`,
         {
-          method: "PUT",
+          method: "PATCH",
           headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
-            ...formData,
             selectedVendorCategories
           })
         },
@@ -1552,6 +2181,8 @@ export default function App() {
       setCurrentPlan(updatedPlan);
       upsertPlan(updatedPlan);
     } catch (error) {
+      setCurrentPlan(previousPlan);
+      upsertPlan(previousPlan);
       alert(error.message);
     } finally {
       setCategorySaving(false);
@@ -1568,7 +2199,17 @@ export default function App() {
   }
 
   async function handleHomeAnalyze(event) {
-    await handleAnalyze(event, "workspace");
+    event.preventDefault();
+    const nextIntake = buildLocalIntake(formData);
+    setCurrentPlan(null);
+    setEditingPlanId(null);
+    setIntake(nextIntake);
+    setActiveStep(0);
+    setCurrentPage("workspace");
+
+    if (nextIntake.readiness === "ready-for-research") {
+      await handleSavePlan();
+    }
   }
 
   async function handleFinalizeVendor(vendorId) {
@@ -1607,32 +2248,104 @@ export default function App() {
   }
 
   if (!user) {
+    const isLegalPage = publicPage === "privacy" || publicPage === "terms";
+    const isPricingPage = publicPage === "pricing";
+    const showHomeAction = publicPage !== "landing";
+    const showLoginAction = publicPage !== "login";
+    const showRegisterAction = publicPage !== "register";
+    const showPricingAction = publicPage !== "pricing";
+    const publicHeading = publicPage === "landing"
+      ? "Share the vision. Let us shape the event."
+      : isPricingPage
+        ? "Plans that fit how you plan"
+      : isLegalPage
+        ? "Legal information"
+        : "Account access";
+
     return (
       <main className="shell public-shell">
         <section className="topbar public-topbar">
           <div>
             <p className="eyebrow">AI Event Planner</p>
-            <h1>{publicPage === "landing" ? "Plan the event. Let the app run the work." : "Account access"}</h1>
+            <h1>{publicHeading}</h1>
           </div>
           <div className="public-auth-actions">
-            <button type="button" className="secondary" onClick={() => navigatePublicPage("login")}>Login</button>
-            <button type="button" onClick={() => navigatePublicPage("register")}>Register</button>
+            {showHomeAction ? (
+              <button type="button" className="secondary" onClick={() => navigatePublicPage("landing")}>Home</button>
+            ) : null}
+            {showPricingAction ? (
+              <button type="button" className="secondary" onClick={() => navigatePublicPage("pricing")}>Pricing</button>
+            ) : null}
+            {showLoginAction ? (
+              <button type="button" className="secondary" onClick={() => navigatePublicPage("login")}>Login</button>
+            ) : null}
+            {showRegisterAction ? (
+              <button type="button" onClick={() => navigatePublicPage("register")}>Register</button>
+            ) : null}
           </div>
         </section>
         {publicPage === "landing" ? (
-          <LandingPage onLogin={() => navigatePublicPage("login")} onRegister={() => navigatePublicPage("register")} />
+          <LandingPage
+            onLogin={() => navigatePublicPage("login")}
+            onRegister={() => navigatePublicPage("register")}
+            onNavigate={navigatePublicPage}
+          />
+        ) : publicPage === "privacy" ? (
+          <LegalPage
+            title="Privacy Policy"
+            summary="Last updated April 1, 2026. This page explains what information AI Event Planner collects, how it is used, and how connected services such as Google Calendar fit into that use."
+            sections={privacySections}
+            onNavigate={navigatePublicPage}
+          />
+        ) : publicPage === "terms" ? (
+          <LegalPage
+            title="Terms of Use"
+            summary="Last updated April 1, 2026. These terms govern access to and use of AI Event Planner, including connected integrations and generated planning workflows."
+            sections={termsSections}
+            onNavigate={navigatePublicPage}
+          />
+        ) : publicPage === "pricing" ? (
+          <PricingPage onOpenContactModal={handleOpenContactModal} />
         ) : (
           <AuthSection
             mode={authMode}
             formData={authForm}
             busy={authBusy}
             message={authMessage}
+            passwordVisible={authPasswordVisible}
+            registerConsentAccepted={registerConsentAccepted}
             onChange={handleAuthFieldChange}
             onSubmit={handleAuthSubmit}
+            onOAuth={handleOAuthSignIn}
+            onOpenConsentDocument={handleOpenConsentDocument}
+            onTogglePasswordVisibility={() => setAuthPasswordVisible((visible) => !visible)}
+            onRegisterConsentToggle={handleRegisterConsentToggle}
             onSwitch={navigatePublicPage}
-            onHome={() => navigatePublicPage("landing")}
+            onNavigate={navigatePublicPage}
           />
         )}
+        {["landing", "login", "register", "pricing"].includes(publicPage) ? (
+          <section className="public-footer-panel">
+            <FooterLinks onNavigate={navigatePublicPage} onContact={handleOpenContactModal} />
+          </section>
+        ) : null}
+        {consentModalStep ? (
+          <ConsentModal
+            documentKey={consentModalStep}
+            onAgree={handleConsentAgree}
+            onDisagree={handleConsentDisagree}
+          />
+        ) : null}
+        {contactModalOpen ? (
+          <ContactModal
+            formData={contactForm}
+            busy={contactBusy}
+            message={contactMessage}
+            onChange={handleContactFieldChange}
+            onClose={handleCloseContactModal}
+            onSubmit={handleContactSubmit}
+          />
+        ) : null}
       </main>
     );
   }
@@ -1696,7 +2409,7 @@ export default function App() {
       </section>
 
       {currentPage === "home" ? (
-        <div className={`home-stage ${isPageTransitioning ? "is-transitioning" : ""}`}>
+        <div className="home-stage">
           <div className="home-dashboard">
             <DashboardSection plans={dashboardPlans} onEdit={handleEditPlan} onPause={handleTogglePause} onDelete={handleDeletePlan} />
           </div>
@@ -1711,93 +2424,95 @@ export default function App() {
           </div>
         </div>
       ) : currentPage === "workspace" ? (
-        <section className="carousel">
-          <SharedComposer
-            mode="workspace"
-            formData={formData}
-            onChange={handleFieldChange}
-            onSubmit={handleSavePlan}
-            onResetEdit={handleResetEdit}
-            onAdvance={handleContinue}
-            editingPlanId={editingPlanId}
-            currentPlan={currentPlan}
-            analyzing={analyzing}
-            savingPlan={savingPlan}
-            intake={intake}
-          />
-          <div className="carousel-tabs">
-            {steps.map((step, index) => (
-              <button
-                key={step.id}
-                type="button"
-                className={`tab-button ${activeStep === index ? "active" : ""}`}
-                onClick={() => { if (canAccessStep(index)) setActiveStep(index); }}
-                disabled={!canAccessStep(index)}
-              >
-                <span className="tab-index">{index + 1}</span>
-                {step.label}
+        <section className="workspace-stage">
+          <section className="carousel">
+            <SharedComposer
+              mode="workspace"
+              formData={formData}
+              onChange={handleFieldChange}
+              onSubmit={handleSavePlan}
+              onResetEdit={handleResetEdit}
+              onAdvance={handleContinue}
+              editingPlanId={editingPlanId}
+              currentPlan={currentPlan}
+              analyzing={analyzing}
+              savingPlan={savingPlan}
+              intake={intake}
+            />
+            <div className="carousel-tabs">
+              {steps.map((step, index) => (
+                <button
+                  key={step.id}
+                  type="button"
+                  className={`tab-button ${activeStep === index ? "active" : ""}`}
+                  onClick={() => { if (canAccessStep(index)) setActiveStep(index); }}
+                  disabled={!canAccessStep(index)}
+                >
+                  <span className="tab-index">{index + 1}</span>
+                  {step.label}
+                </button>
+              ))}
+            </div>
+            <div className="carousel-track" style={{ transform: `translateX(-${activeStep * 100}%)` }}>
+              <div className="carousel-slide">
+                <IntakeSection intake={intake} analyzing={analyzing} />
+              </div>
+              <div className="carousel-slide">
+                {currentPlan ? (
+                  <DirectionSection
+                    plan={currentPlan}
+                    intake={intake}
+                    onShowVendors={handleShowVendors}
+                    onToggleVendorCategory={handleToggleVendorCategory}
+                    categorySaving={categorySaving}
+                  />
+                ) : (
+                  <section className="panel">
+                    <h2>Create an event plan to continue</h2>
+                    <p>Complete the intake details and continue to generate event direction.</p>
+                  </section>
+                )}
+              </div>
+              <div className="carousel-slide">
+                {currentPlan ? (
+                  <MatchesSection
+                    plan={currentPlan}
+                    onFinalizeVendor={handleFinalizeVendor}
+                    onSendInquiries={handleStartOutreach}
+                    sendingInquiries={sendingInquiries}
+                  />
+                ) : (
+                  <section className="panel">
+                    <h2>No recommendations yet</h2>
+                    <p>Generate the event plan first to see recommended matches.</p>
+                  </section>
+                )}
+              </div>
+              <div className="carousel-slide">
+                {currentPlan ? (
+                  <CommunicationSection plan={currentPlan} />
+                ) : (
+                  <section className="panel">
+                    <h2>No communications yet</h2>
+                    <p>Once outreach begins, the communication log will appear here.</p>
+                  </section>
+                )}
+              </div>
+            </div>
+            <div className="carousel-nav">
+              <button type="button" className="secondary" onClick={() => setActiveStep((step) => Math.max(0, step - 1))} disabled={activeStep === 0}>
+                Previous
               </button>
-            ))}
-          </div>
-          <div className="carousel-track" style={{ transform: `translateX(-${activeStep * 100}%)` }}>
-            <div className="carousel-slide">
-              <IntakeSection intake={intake} />
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setActiveStep((step) => Math.min(steps.length - 1, step + 1))}
+                disabled={!canAccessStep(activeStep + 1)}
+              >
+                Next
+              </button>
             </div>
-            <div className="carousel-slide">
-              {currentPlan ? (
-                <DirectionSection
-                  plan={currentPlan}
-                  intake={intake}
-                  onShowVendors={handleShowVendors}
-                  onToggleVendorCategory={handleToggleVendorCategory}
-                  categorySaving={categorySaving}
-                />
-              ) : (
-                <section className="panel">
-                  <h2>Create an event plan to continue</h2>
-                  <p>Complete the intake details and continue to generate event direction.</p>
-                </section>
-              )}
-            </div>
-            <div className="carousel-slide">
-              {currentPlan ? (
-                <MatchesSection
-                  plan={currentPlan}
-                  onFinalizeVendor={handleFinalizeVendor}
-                  onSendInquiries={handleStartOutreach}
-                  sendingInquiries={sendingInquiries}
-                />
-              ) : (
-                <section className="panel">
-                  <h2>No recommendations yet</h2>
-                  <p>Generate the event plan first to see recommended matches.</p>
-                </section>
-              )}
-            </div>
-            <div className="carousel-slide">
-              {currentPlan ? (
-                <CommunicationSection plan={currentPlan} />
-              ) : (
-                <section className="panel">
-                  <h2>No communications yet</h2>
-                  <p>Once outreach begins, the communication log will appear here.</p>
-                </section>
-              )}
-            </div>
-          </div>
-          <div className="carousel-nav">
-            <button type="button" className="secondary" onClick={() => setActiveStep((step) => Math.max(0, step - 1))} disabled={activeStep === 0}>
-              Previous
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setActiveStep((step) => Math.min(steps.length - 1, step + 1))}
-              disabled={!canAccessStep(activeStep + 1)}
-            >
-              Next
-            </button>
-          </div>
+          </section>
         </section>
       ) : (
         <section className="account-stage">
@@ -1848,49 +2563,72 @@ export default function App() {
   );
 }
 
-function LandingPage({ onLogin, onRegister }) {
+function LandingPage({ onLogin, onRegister, onNavigate }) {
   return (
     <section className="landing-page">
       <div className="landing-hero panel">
         <div className="landing-hero-copy">
           <p className="section-kicker">Automated event operations</p>
-          <h2>Brief once. Source vendors, send outreach, and track replies from one workspace.</h2>
+          <h2>
+            Brief once.<br />
+            Explore ideas.<br />
+            Source vendors.<br />
+            Reach out.<br />
+            All in<br />
+            one space.
+          </h2>
           <p className="landing-lead">
             AI Event Planner turns a rough event idea into a working plan with vendor categories, recommended matches,
-            outreach drafts, and a live operations dashboard your team can actually use.
+            live vendor outreach, price negotiation, and an operations dashboard your team can actually use.
           </p>
           <div className="landing-cta-row">
             <button type="button" onClick={onRegister}>Create an account</button>
             <button type="button" className="secondary" onClick={onLogin}>Sign in</button>
           </div>
           <div className="landing-proof-strip">
-            <span>Vendor recommendations by category</span>
-            <span>Inbox-ready outreach drafts</span>
-            <span>Reply tracking and final selection</span>
+            <span>Ideas shaped from one brief</span>
+            <span>Vendor sourcing by category</span>
+            <span>Live outreach sent for you</span>
+            <span>Price negotiation in motion</span>
+            <span>Replies tracked in one space</span>
+            <span>Calendar holds and event flow</span>
           </div>
         </div>
         <div className="landing-hero-card">
-          <div className="landing-mini-card">
-            <span className="metric-label">Event status</span>
-            <strong>Plan ready in minutes</strong>
-            <p>Move from intake to shortlist, outreach, and final vendor selection without juggling spreadsheets.</p>
+          <div className="landing-offer-callout">
+            <strong className="landing-offer-title">
+              <span>Plan Your First Event</span>
+              <span>With Every Feature</span>
+              <span>Unlocked!</span>
+            </strong>
+            <p className="fine-print">
+              Creating an account and planning your first event is fully free for all features, including automatic
+              communications and price negotiations!
+            </p>
           </div>
-          <div className="landing-mini-grid">
-            <div className="metric-card">
-              <span className="metric-label">Vendors shortlisted</span>
-              <strong>12</strong>
+          <div className="landing-hero-metrics">
+            <div className="landing-mini-card">
+              <span className="metric-label">Event status</span>
+              <strong>Plan ready in minutes</strong>
+              <p>Move from intake to shortlist, outreach, and final vendor selection without juggling spreadsheets.</p>
             </div>
-            <div className="metric-card">
-              <span className="metric-label">Replies tracked</span>
-              <strong>7</strong>
-            </div>
-            <div className="metric-card">
-              <span className="metric-label">Planning steps</span>
-              <strong>4</strong>
-            </div>
-            <div className="metric-card">
-              <span className="metric-label">One workspace</span>
-              <strong>100%</strong>
+            <div className="landing-mini-grid">
+              <div className="metric-card">
+                <span className="metric-label">Vendors accessible</span>
+                <strong>1000s</strong>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">Replies tracked</span>
+                <strong>7</strong>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">Planning steps</span>
+                <strong>4</strong>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">One workspace</span>
+                <strong>100%</strong>
+              </div>
             </div>
           </div>
         </div>
@@ -1898,49 +2636,111 @@ function LandingPage({ onLogin, onRegister }) {
 
       <div className="landing-grid">
         <article className="panel landing-feature-card">
-          <p className="section-kicker">For busy planners</p>
-          <h3>Start with a loose brief</h3>
-          <p className="fine-print">Describe the event in plain language and the app structures the intake, budget, dates, theme, and guest requirements.</p>
+          <p className="section-kicker">For busy planning</p>
+          <h3>Start with the vision</h3>
+          <p className="fine-print">Share the event idea once and the app helps shape the brief, collect missing details, and turn it into a workable direction.</p>
         </article>
         <article className="panel landing-feature-card">
           <p className="section-kicker">For vendor sourcing</p>
-          <h3>Get curated matches fast</h3>
-          <p className="fine-print">Recommended vendor groups stay tied to the event direction so your shortlist is easier to review and action.</p>
+          <h3>Source the right vendors</h3>
+          <p className="fine-print">Vendor categories and matches stay tied to the event plan, so you can review options, compare fit, and move quickly.</p>
         </article>
         <article className="panel landing-feature-card">
           <p className="section-kicker">For execution</p>
-          <h3>Keep outreach moving</h3>
-          <p className="fine-print">Draft inquiries, send outreach, monitor replies, and finalize the right fit without losing context between tools.</p>
+          <h3>Keep execution moving</h3>
+          <p className="fine-print">Send outreach, manage replies, negotiate pricing, and keep the event moving forward without bouncing between tools.</p>
         </article>
       </div>
+
+      <section className="panel why-us-panel">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Why choose us</p>
+            <h3>More than ideas. More than a vendor list.</h3>
+          </div>
+        </div>
+        <div className="why-us-grid">
+          <article className="landing-feature-card why-us-card">
+            <h3>1. One flow, not five tools</h3>
+            <p className="fine-print">Most event tools stop at inspiration or planning notes. AI Event Planner connects ideas, vendor sourcing, outreach, negotiation, and execution in one place.</p>
+          </article>
+          <article className="landing-feature-card why-us-card">
+            <h3>2. We do the outreach</h3>
+            <p className="fine-print">Instead of leaving you with a shortlist to manage manually, the app is built to send outreach, track replies, and keep vendor conversations moving.</p>
+          </article>
+          <article className="landing-feature-card why-us-card">
+            <h3>3. Built for momentum</h3>
+            <p className="fine-print">The goal is not just to organize information. It is to help you move from vision to booked vendors and a live event plan without losing speed.</p>
+          </article>
+        </div>
+      </section>
     </section>
   );
 }
 
-function AuthSection({ mode, formData, busy, message, onChange, onSubmit, onSwitch, onHome }) {
+function AuthSection({ mode, formData, busy, message, passwordVisible, registerConsentAccepted, onChange, onSubmit, onOAuth, onOpenConsentDocument, onTogglePasswordVisibility, onRegisterConsentToggle, onSwitch, onNavigate }) {
   const isLogin = mode === "login";
   const isRegister = mode === "register";
   const isForgot = mode === "forgot";
   const isReset = mode === "reset";
+  const showOAuth = isLogin || isRegister;
 
   return (
     <section className="auth-shell">
       <div className="panel auth-panel">
-        <div className="auth-panel-topline">
-          <button type="button" className="secondary" onClick={onHome}>Back to home</button>
-        </div>
-        <p className="section-kicker">Account</p>
-        <h2>{isLogin ? "Sign in" : isRegister ? "Create account" : isForgot ? "Reset password" : "Choose a new password"}</h2>
+        <p className="section-kicker">{isLogin ? "Log in" : isRegister ? "Register" : "Account"}</p>
+        <h2>{isLogin ? "Welcome Back!" : isRegister ? "Create account" : isForgot ? "Reset password" : "Choose a new password"}</h2>
         <p className="fine-print">
           {isLogin
-            ? "Sign in with your email or username to access your event plans and replies."
+            ? "Sign in with your provider or email to access your event plans."
             : isRegister
-              ? "Register with your full name and email. The app will generate a unique username for your reply mailbox."
+              ? "Register using your provider or email. We will generate a unique username for you."
               : isForgot
                 ? "Enter your email address and we will send a reset message."
                 : "Paste the reset token from your email and choose a strong new password."}
         </p>
         {message ? <p className="fine-print">{message}</p> : null}
+        {showOAuth ? (
+          <>
+            <div className="auth-divider"><span>use provider</span></div>
+            <div className="oauth-actions">
+              <button type="button" className="secondary oauth-button oauth-provider-button" disabled>
+                <span className="oauth-provider-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" focusable="false">
+                    <path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.3-1.5 3.9-5.4 3.9-3.2 0-5.9-2.7-5.9-6s2.7-6 5.9-6c1.8 0 3.1.8 3.8 1.4l2.6-2.5C16.7 3.3 14.6 2.4 12 2.4 6.9 2.4 2.8 6.5 2.8 11.6s4.1 9.2 9.2 9.2c5.3 0 8.8-3.7 8.8-8.9 0-.6-.1-1.1-.1-1.7H12Z" />
+                    <path fill="#34A853" d="M2.8 11.6c0 1.6.4 3.2 1.3 4.5l3.3-2.5c-.4-.6-.6-1.3-.6-2s.2-1.4.6-2L4.1 7.1c-.9 1.3-1.3 2.8-1.3 4.5Z" />
+                    <path fill="#FBBC05" d="M12 20.8c2.5 0 4.7-.8 6.3-2.3l-3.1-2.4c-.8.5-1.8.8-3.2.8-2.5 0-4.6-1.7-5.3-4l-3.4 2.6c1.6 3.1 4.8 5.3 8.7 5.3Z" />
+                    <path fill="#4285F4" d="M18.3 18.5c1.8-1.6 2.5-4 2.5-6.6 0-.6-.1-1.1-.1-1.7H12v3.9h5.4c-.2 1-.8 2.5-2.2 3.4l3.1 2.4Z" />
+                  </svg>
+                </span>
+                <span>Google</span>
+              </button>
+              <button type="button" className="secondary oauth-button oauth-provider-button" disabled>
+                <span className="oauth-provider-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" focusable="false">
+                    <path fill="#F25022" d="M2 2h9.5v9.5H2z" />
+                    <path fill="#7FBA00" d="M12.5 2H22v9.5h-9.5z" />
+                    <path fill="#00A4EF" d="M2 12.5h9.5V22H2z" />
+                    <path fill="#FFB900" d="M12.5 12.5H22V22h-9.5z" />
+                  </svg>
+                </span>
+                <span>Microsoft</span>
+              </button>
+              <button type="button" className="secondary oauth-button oauth-provider-button" disabled>
+                <span className="oauth-provider-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" role="img" focusable="false">
+                    <path
+                      fill="currentColor"
+                      d="M16.7 12.7c0-2.3 1.9-3.4 2-3.4-1.1-1.6-2.8-1.8-3.4-1.8-1.5-.2-2.8.8-3.6.8-.8 0-1.9-.8-3.2-.8-1.7 0-3.2 1-4 2.4-1.7 2.9-.4 7.3 1.2 9.6.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.9-2.3.9-1.3 1.3-2.6 1.3-2.7-.1 0-2.3-.9-2.3-4.1Zm-2.3-6.8c.7-.8 1.1-1.9 1-3-.9 0-2.1.6-2.8 1.4-.6.7-1.2 1.9-1 3 .9.1 2-.5 2.8-1.4Z"
+                    />
+                  </svg>
+                </span>
+                <span>Apple</span>
+              </button>
+            </div>
+          </>
+        ) : null}
+        {showOAuth ? <div className="auth-divider"><span>or use email</span></div> : null}
         <form className="planner-form" onSubmit={onSubmit}>
           {isLogin ? (
             <label className="field">
@@ -1973,17 +2773,55 @@ function AuthSection({ mode, formData, busy, message, onChange, onSubmit, onSwit
             </label>
           ) : null}
           {!isForgot ? (
-            <label className="field">
-              <span>Password</span>
-              <input
+            <>
+              <PasswordField
                 name="password"
-                type="password"
                 value={formData.password}
                 onChange={onChange}
-                placeholder="12+ chars, upper, lower, number, symbol"
+                placeholder="8+ chars, upper, lower, number, symbol"
                 autoComplete={isLogin ? "current-password" : "new-password"}
+                visible={passwordVisible}
+                onToggle={onTogglePasswordVisibility}
               />
-            </label>
+              {isLogin ? (
+                <button type="button" className="text-link inline-text-link auth-inline-link" disabled={busy} onClick={() => onSwitch("forgot")}>
+                  Forgot Password?
+                </button>
+              ) : null}
+            </>
+          ) : null}
+          {isRegister ? (
+            <div className="consent-stack">
+              <label className="consent-item">
+                <input type="checkbox" checked={registerConsentAccepted} onChange={onRegisterConsentToggle} />
+                <span>
+                  I agree to the{" "}
+                  <button
+                    type="button"
+                    className="text-link inline-text-link"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onOpenConsentDocument("privacy");
+                    }}
+                  >
+                    Privacy Policy
+                  </button>{" "}
+                  and{" "}
+                  <button
+                    type="button"
+                    className="text-link inline-text-link"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onOpenConsentDocument("terms");
+                    }}
+                  >
+                    Terms of Use
+                  </button>
+                </span>
+              </label>
+            </div>
           ) : null}
           <div className="action-row">
             <button
@@ -1991,7 +2829,7 @@ function AuthSection({ mode, formData, busy, message, onChange, onSubmit, onSwit
               disabled={
                 busy ||
                 (isLogin && (!formData.identifier.trim() || !formData.password)) ||
-                (isRegister && (!formData.fullName.trim() || !formData.email.trim() || !formData.password)) ||
+                (isRegister && (!formData.fullName.trim() || !formData.email.trim() || !formData.password || !registerConsentAccepted)) ||
                 (isForgot && !formData.email.trim()) ||
                 (isReset && (!formData.token.trim() || !formData.password))
               }
@@ -2006,11 +2844,6 @@ function AuthSection({ mode, formData, busy, message, onChange, onSubmit, onSwit
                 onClick={() => onSwitch(isLogin ? "register" : "login")}
               >
                 {isLogin ? "Need an account?" : "Back to sign in"}
-              </button>
-            ) : null}
-            {isLogin ? (
-              <button type="button" className="secondary" disabled={busy} onClick={() => onSwitch("forgot")}>
-                Forgot password
               </button>
             ) : null}
           </div>
