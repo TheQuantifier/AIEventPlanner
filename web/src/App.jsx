@@ -206,6 +206,10 @@ function getUserInitials(user) {
   return fallback.toUpperCase() || "U";
 }
 
+function formatAccountTypeLabel(value) {
+  return toTitleCase(String(value || "free").replace(/-/g, " "));
+}
+
 async function requestJson(url, options = {}, fallbackMessage = "Request failed") {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => ({}));
@@ -498,11 +502,11 @@ function PricingPage({ onOpenContactModal }) {
   const featureRows = [
     {
       label: "Price",
-      values: ["$0.00/month", "$15.00/month", "Special*"]
+      values: ["$0.00/month", "$10.00/month", "Special"]
     },
     {
       label: "Event size",
-      values: ["Small to mid-size events", "Small to mid-size events", "Small events and large productions"]
+      values: ["Small to mid-size events", "Small to mid-size events", "All size events"]
     },
     {
       label: "AI plan creation",
@@ -582,7 +586,7 @@ function PricingPage({ onOpenContactModal }) {
               {row.values.map((value, valueIndex) => (
                 <div key={`${row.label}-${valueIndex}`} className="pricing-cell" role="cell">
                   <span className="pricing-cell-text">
-                    {row.label === "Price\n(per month)" && valueIndex === 2 ? (
+                    {row.label === "Price" && valueIndex === 2 ? (
                       <>
                         Special<sup className="pricing-asterisk">*</sup>
                       </>
@@ -606,8 +610,8 @@ function PricingPage({ onOpenContactModal }) {
           <button type="button" className="text-link inline-text-link" onClick={onOpenContactModal}>contact us</button>.
         </p>
         <p className="fine-print pricing-footnote">
-          <span className="pricing-asterisk">**</span> An event is considered locked in once <strong>See vendors</strong> is selected.
-          You can cancel and still use your 1 free event vendor outreach and negotiation access on other events before pressing <strong>See vendors</strong>.
+          <span className="pricing-asterisk">**</span> An event is considered locked in once <strong>Contact vendors</strong> or <strong>Select vendors</strong> is pressed.
+          You can cancel and still use your free vendor outreaches and negotiation access on other events before pressing <strong>Contact vendors</strong> or <strong>Select vendors</strong>.
         </p>
       </section>
     </section>
@@ -1026,16 +1030,25 @@ function DirectionSection({ plan, intake, onShowVendors, onToggleVendorCategory,
   );
 }
 
-function MatchesSection({ plan, onFinalizeVendor, onSendInquiries, sendingInquiries }) {
+function MatchesSection({ plan, user, message, onFinalizeVendor, onSendInquiries, sendingInquiries }) {
   if (!plan) return null;
   const vendorGroups = groupVendorsByCategory(plan);
   const inquiries = plan.communication?.outboundMessages?.filter((message) => message.type === "inquiry") || [];
   const alreadySent = inquiries.length > 0;
+  const hasUsageLimits = user?.accountType === "free" || user?.accountType === "test";
+  const usageLabel = user?.accountType === "test" ? "Test plan usage" : "Free plan usage";
 
   return (
     <section className="results">
       <div className="panel">
         <h2>Recommended matches</h2>
+        {hasUsageLimits ? (
+          <p className="fine-print">
+            {usageLabel}: {user.automatedOutreachEventsRemaining} automated outreach event{user.automatedOutreachEventsRemaining === 1 ? "" : "s"} left.{" "}
+            {user.automatedNegotiationEventsRemaining} automated price negotiation event{user.automatedNegotiationEventsRemaining === 1 ? "" : "s"} left.
+          </p>
+        ) : null}
+        {message ? <p className="fine-print">{message}</p> : null}
         <div className="action-row section-actions matches-actions">
           <button type="button" disabled={plan.isPaused || alreadySent || sendingInquiries} onClick={onSendInquiries}>
             {plan.isPaused ? "Event paused" : sendingInquiries ? "Sending inquiries..." : alreadySent ? "Outreach already handled" : "Start outreach"}
@@ -1186,6 +1199,7 @@ function AccountPanel({
               {profileSaving ? "Saving..." : "Save profile"}
             </button>
             <div className="topbar-badge">Username: {user.username}</div>
+            <div className="topbar-badge">Plan: {formatAccountTypeLabel(user.accountType)}</div>
           </div>
         </form>
       </section>
@@ -1246,6 +1260,25 @@ function AccountPanel({
     );
   }
 
+  if (view === "admin") {
+    return (
+      <section className="panel account-panel">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Admin</p>
+            <h2>App settings</h2>
+          </div>
+        </div>
+        <div className="follow-up-list">
+          <div className="follow-up-item">
+            <strong>Admin settings page</strong>
+            <p className="fine-print">This space is reserved for app-level settings and admin controls. Add the settings you want here next.</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return null;
 }
 
@@ -1275,6 +1308,7 @@ export default function App() {
   const [savingPlan, setSavingPlan] = useState(false);
   const [sendingInquiries, setSendingInquiries] = useState(false);
   const [categorySaving, setCategorySaving] = useState(false);
+  const [workspaceMessage, setWorkspaceMessage] = useState("");
   const [activeStep, setActiveStep] = useState(0);
   const [currentPage, setCurrentPage] = useState("home");
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -1317,6 +1351,7 @@ export default function App() {
     setDashboardPlans([]);
     setCurrentPlan(null);
     setEditingPlanId(null);
+    setWorkspaceMessage("");
     setCurrentPage("home");
     setPublicPage("landing");
     setAuthMode("login");
@@ -1467,6 +1502,7 @@ export default function App() {
     setEditingPlanId(null);
     setIntake(null);
     setFormData(emptyForm);
+    setWorkspaceMessage("");
     setAuthForm(emptyAuthForm);
     setAuthMessage("");
     setContactModalOpen(false);
@@ -2046,6 +2082,7 @@ export default function App() {
             : "Plan created from the latest event details."
         )
       );
+      setWorkspaceMessage("");
       upsertPlan(plan);
       setActiveStep(1);
     } catch (error) {
@@ -2078,6 +2115,7 @@ export default function App() {
       }
 
       setIntake(nextIntake);
+      setWorkspaceMessage("");
 
       if (nextIntake.readiness === "ready-for-research") {
         await handleContinue();
@@ -2099,6 +2137,7 @@ export default function App() {
     setCurrentPlan(null);
     setIntake(null);
     setFormData(emptyForm);
+    setWorkspaceMessage("");
     setActiveStep(0);
     setCurrentPage("home");
   }
@@ -2108,6 +2147,7 @@ export default function App() {
     setCurrentPlan(plan);
     setIntake(buildEditorIntakeFromPlan(plan, "Loaded existing plan into the editor."));
     setFormData(eventFormFromPlan(plan));
+    setWorkspaceMessage("");
     setActiveStep(1);
     setCurrentPage("workspace");
   }
@@ -2139,8 +2179,10 @@ export default function App() {
       const updatedPlan = await requestJson(`${apiBaseUrl}/api/plans/${currentPlan.id}/send-inquiries`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }) }, "Failed to send inquiry emails");
       setCurrentPlan(updatedPlan);
       upsertPlan(updatedPlan);
+      setWorkspaceMessage("");
+      await loadCurrentUser();
     } catch (error) {
-      alert(error.message);
+      setWorkspaceMessage(error.message);
     } finally {
       setSendingInquiries(false);
     }
@@ -2204,6 +2246,7 @@ export default function App() {
     setCurrentPlan(null);
     setEditingPlanId(null);
     setIntake(nextIntake);
+    setWorkspaceMessage("");
     setActiveStep(0);
     setCurrentPage("workspace");
 
@@ -2218,8 +2261,10 @@ export default function App() {
       const updatedPlan = await requestJson(`${apiBaseUrl}/api/plans/${currentPlan.id}/finalize`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ vendorId }) }, "Failed to finalize vendor");
       setCurrentPlan(updatedPlan);
       upsertPlan(updatedPlan);
+      setWorkspaceMessage("");
+      await loadCurrentUser();
     } catch (error) {
-      alert(error.message);
+      setWorkspaceMessage(error.message);
     }
   }
 
@@ -2257,7 +2302,7 @@ export default function App() {
     const publicHeading = publicPage === "landing"
       ? "Share the vision. Let us shape the event."
       : isPricingPage
-        ? "Plans that fit how you plan"
+        ? "Plans that fit you"
       : isLegalPage
         ? "Legal information"
         : "Account access";
@@ -2353,7 +2398,7 @@ export default function App() {
   return (
     <main className="shell">
       <section className="topbar">
-        {(currentPage === "profile" || currentPage === "settings") ? (
+        {(currentPage === "profile" || currentPage === "settings" || currentPage === "admin") ? (
           <button type="button" className="secondary" onClick={() => setCurrentPage("home")}>
             Return to dashboard
           </button>
@@ -2366,7 +2411,8 @@ export default function App() {
                 home: "Operations dashboard",
                 workspace: "Event workspace",
                 profile: "Profile",
-                settings: "Settings"
+                settings: "Settings",
+                admin: "Admin"
               }[currentPage] || "AI Event Planner"
             }
           </h1>
@@ -2399,6 +2445,11 @@ export default function App() {
                 <button type="button" className="account-menu-item" onClick={() => goToAccountPage("settings")}>
                   Settings
                 </button>
+                {user.accountType === "admin" ? (
+                  <button type="button" className="account-menu-item" onClick={() => goToAccountPage("admin")}>
+                    Admin
+                  </button>
+                ) : null}
                 <button type="button" className="account-menu-item" onClick={() => { setAccountMenuOpen(false); handleLogout(); }}>
                   Sign out
                 </button>
@@ -2477,6 +2528,8 @@ export default function App() {
                 {currentPlan ? (
                   <MatchesSection
                     plan={currentPlan}
+                    user={user}
+                    message={workspaceMessage}
                     onFinalizeVendor={handleFinalizeVendor}
                     onSendInquiries={handleStartOutreach}
                     sendingInquiries={sendingInquiries}
@@ -2605,6 +2658,9 @@ function LandingPage({ onLogin, onRegister, onNavigate }) {
               Creating an account and planning your first event is fully free for all features, including automatic
               communications and price negotiations!
             </p>
+            <button type="button" className="text-link landing-pricing-link" onClick={() => onNavigate("pricing")}>
+              See Pricing
+            </button>
           </div>
           <div className="landing-hero-metrics">
             <div className="landing-mini-card">

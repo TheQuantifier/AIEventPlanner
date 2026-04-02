@@ -116,12 +116,25 @@ function sanitizeUser(row) {
     return null;
   }
 
+  const accountType = row.account_type || "free";
+  const automatedEventCount = Number(row.automated_event_count) || 0;
+  const automatedOutreachEventsUsed = Number(row.automated_outreach_events_used) || 0;
+  const automatedNegotiationEventsUsed = Number(row.automated_negotiation_events_used) || 0;
+  const outreachLimit = accountType === "free" ? 3 : accountType === "test" ? 3 : null;
+  const negotiationLimit = accountType === "free" ? 1 : accountType === "test" ? 3 : null;
+
   return {
     id: row.id,
     username: row.username,
     email: row.email || "",
     fullName: row.full_name || "",
     organization: row.organization || "",
+    accountType,
+    automatedEventCount,
+    automatedOutreachEventsUsed,
+    automatedNegotiationEventsUsed,
+    automatedOutreachEventsRemaining: outreachLimit === null ? null : Math.max(0, outreachLimit - automatedOutreachEventsUsed),
+    automatedNegotiationEventsRemaining: negotiationLimit === null ? null : Math.max(0, negotiationLimit - automatedNegotiationEventsUsed),
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at
   };
 }
@@ -134,7 +147,7 @@ async function loadUserByIdentifier(identifier) {
   const result = await query(
     `
       select id, username, email, full_name, password_hash, created_at
-           , organization
+           , organization, account_type, automated_event_count, automated_outreach_events_used, automated_negotiation_events_used
       from app_users
       where username = $1
          or lower(email) = $2
@@ -155,7 +168,7 @@ async function loadUserByEmail(email) {
   const result = await query(
     `
       select id, username, email, full_name, password_hash, created_at
-           , organization
+           , organization, account_type, automated_event_count, automated_outreach_events_used, automated_negotiation_events_used
       from app_users
       where lower(email) = $1
       limit 1
@@ -333,6 +346,7 @@ async function loadProviderAccount(provider, providerAccountId) {
     `
       select pa.user_id
            , u.id, u.username, u.email, u.full_name, u.password_hash, u.created_at, u.organization
+           , u.account_type, u.automated_event_count, u.automated_outreach_events_used, u.automated_negotiation_events_used
       from app_auth_provider_accounts pa
       join app_users u on u.id = pa.user_id
       where pa.provider = $1
@@ -378,7 +392,7 @@ async function createUserForOAuthProfile({ email, fullName }) {
     `
       insert into app_users (id, username, email, full_name, password_hash)
       values ($1, $2, $3, $4, null)
-      returning id, username, email, full_name, organization, created_at
+      returning id, username, email, full_name, organization, account_type, automated_event_count, automated_outreach_events_used, automated_negotiation_events_used, created_at
     `,
     [userId, username, normalizedEmail, normalizedFullName]
   );
@@ -557,7 +571,7 @@ export async function registerUser({ email, fullName, password }) {
     `
       insert into app_users (id, username, email, full_name, password_hash)
       values ($1, $2, $3, $4, $5)
-      returning id, username, email, full_name, organization, created_at
+      returning id, username, email, full_name, organization, account_type, automated_event_count, automated_outreach_events_used, automated_negotiation_events_used, created_at
     `,
     [userId, username, normalizedEmail, normalizedFullName, passwordHash]
   );
@@ -665,7 +679,7 @@ export async function getUserFromToken(token) {
   const result = await query(
     `
       select u.id, u.username, u.email, u.full_name, u.created_at
-           , u.organization
+           , u.organization, u.account_type, u.automated_event_count, u.automated_outreach_events_used, u.automated_negotiation_events_used
       from app_sessions s
       join app_users u on u.id = s.user_id
       where s.token_hash = $1
@@ -699,7 +713,7 @@ export async function requestPasswordReset({ email }) {
   const result = await query(
     `
       select id, username, email, full_name, created_at
-           , organization
+           , organization, account_type, automated_event_count, automated_outreach_events_used, automated_negotiation_events_used
       from app_users
       where lower(email) = $1
       limit 1
@@ -813,7 +827,7 @@ export async function updateUserProfile(userId, { fullName, email, organization 
           organization = $3,
           updated_at = now()
       where id = $4
-      returning id, username, email, full_name, organization, created_at
+      returning id, username, email, full_name, organization, account_type, automated_event_count, automated_outreach_events_used, automated_negotiation_events_used, created_at
     `,
     [normalizedEmail, normalizedFullName, normalizedOrganization, userId]
   );

@@ -148,7 +148,10 @@ function mapPlanRow(planRow, suggestions, vendorCategoryRows, vendorRows, servic
     automation: {
       inquiryEmailsDrafted: vendors.length,
       inquiryEmailsSent: outboundRows.filter((message) => message.type === "inquiry" && message.delivery_ok).length,
-      vendorRepliesReceived: inboundRows.length
+      vendorRepliesReceived: inboundRows.length,
+      automatedEventSequence: Number(planRow.automation_event_sequence) || null,
+      outreachUsageApplied: Boolean(planRow.outreach_usage_applied),
+      negotiationUsageApplied: Boolean(planRow.negotiation_usage_applied)
     },
     shortlist: vendors,
     finalSelection: planRow.final_selection_vendor_id
@@ -229,13 +232,14 @@ export async function savePlan(plan) {
           id, user_id, created_at, updated_at, workflow_state, is_paused, reply_to,
           event_brief, event_title, event_type, event_theme, event_budget, event_budget_label,
           event_location, event_date_window, event_guest_count, event_planner_summary,
-          final_selection_vendor_id, final_selection_vendor_name, final_selection_selected_at
+          final_selection_vendor_id, final_selection_vendor_name, final_selection_selected_at,
+          automation_event_sequence, outreach_usage_applied, negotiation_usage_applied
         )
         values (
           $1, $2, $3::timestamptz, $4::timestamptz, $5, $6, $7,
           $8, $9, $10, $11, $12, $13,
           $14, $15, $16, $17,
-          $18, $19, $20::timestamptz
+          $18, $19, $20::timestamptz, $21, $22, $23
         )
         on conflict (id) do update
         set user_id = excluded.user_id,
@@ -255,7 +259,10 @@ export async function savePlan(plan) {
             event_planner_summary = excluded.event_planner_summary,
             final_selection_vendor_id = excluded.final_selection_vendor_id,
             final_selection_vendor_name = excluded.final_selection_vendor_name,
-            final_selection_selected_at = excluded.final_selection_selected_at
+            final_selection_selected_at = excluded.final_selection_selected_at,
+            automation_event_sequence = excluded.automation_event_sequence,
+            outreach_usage_applied = excluded.outreach_usage_applied,
+            negotiation_usage_applied = excluded.negotiation_usage_applied
       `,
       [
         plan.id,
@@ -277,7 +284,10 @@ export async function savePlan(plan) {
         plan.event?.plannerSummary || "",
         plan.finalSelection?.vendorId || null,
         plan.finalSelection?.vendorName || "",
-        plan.finalSelection?.selectedAt || null
+        plan.finalSelection?.selectedAt || null,
+        Number(plan.automation?.automatedEventSequence) || null,
+        Boolean(plan.automation?.outreachUsageApplied),
+        Boolean(plan.automation?.negotiationUsageApplied)
       ]
     );
 

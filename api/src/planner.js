@@ -2,10 +2,11 @@ import { vendorCatalog } from "./data/vendors.js";
 import { buildConfirmationEmail, buildInquiryEmail } from "./email.js";
 import { buildPlanReplyAddress, buildUserReplyAddress, buildUserSenderAddress, isTestModeEnabled, resolveAppInbox, sendEmail } from "./email-client.js";
 import { generateIntakeWithAi, generatePlanWithAi, isAiConfigured } from "./ai-planner.js";
-import { deletePlan, isDbConfigured, listPlans, loadPlan, savePlan } from "./db.js";
+import { deletePlan, isDbConfigured, listPlans, loadPlan, query, savePlan } from "./db.js";
 
 const plans = new Map();
 const requiredFields = ["brief", "budget", "location", "dates"];
+const UNRESTRICTED_ACCOUNT_TYPES = new Set(["pro", "business", "admin"]);
 
 function createId(prefix) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
@@ -33,6 +34,177 @@ function buildOwnerSummary(user) {
         userId: null,
         username: ""
       };
+}
+
+async function loadUserAutomationProfile(userId) {
+  const result = await query(
+    `
+      select id, account_type, automated_event_count, automated_outreach_events_used, automated_negotiation_events_used
+      from app_users
+      where id = $1
+      limit 1
+    `,
+    [userId]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    accountType: row.account_type || "free",
+    automatedEventCount: Number(row.automated_event_count) || 0,
+    automatedOutreachEventsUsed: Number(row.automated_outreach_events_used) || 0,
+    automatedNegotiationEventsUsed: Number(row.automated_negotiation_events_used) || 0
+  };
+}
+
+function buildFreeAutomationLimitError(type) {
+  if (type === "negotiation") {
+    return {
+      error: "You have run out of free uses of automated price negotiations. You can view drafts now."
+    };
+  }
+
+  return {
+    error: "You have run out of free uses of automated vendor communications. You can view drafts now."
+  };
+}
+
+function getAutomationLimits(accountType) {
+  if (accountType === "free") {
+    return {
+      outreach: 3,
+      negotiation: 1
+    };
+  }
+
+  if (accountType === "test") {
+    return {
+      outreach: 3,
+      negotiation: 3
+    };
+  }
+
+  return {
+    outreach: null,
+    negotiation: null
+  };
+}
+
+async function incrementUserAutomationCounter(userId, columnName, maxCountExclusive = null) {
+  const whereClause = maxCountExclusive === null ? "where id = $1" : `where id = $1 and ${columnName} < $2`;
+  const params = maxCountExclusive === null ? [userId] : [userId, maxCountExclusive];
+  const result = await query(
+    `
+      update app_users
+      set ${columnName} = ${columnName} + 1,
+          automated_event_count = greatest(
+            automated_event_count,
+            ${columnName} + 1
+          ),
+          updated_at = now()
+      ${whereClause}
+      returning automated_event_count, automated_outreach_events_used, automated_negotiation_events_used
+    `,
+    params
+  );
+
+  const row = result.rows[0];
+  return row
+    ? {
+        automatedEventCount: Number(row.automated_event_count) || 0,
+        automatedOutreachEventsUsed: Number(row.automated_outreach_events_used) || 0,
+        automatedNegotiationEventsUsed: Number(row.automated_negotiation_events_used) || 0
+      }
+    : null;
+}
+
+async function resolvePlanAutomationAccess(plan, userId, actionType) {
+  const userProfile = await loadUserAutomationProfile(userId);
+
+  if (!userProfile) {
+    return {
+      error: "Account not found"
+    };
+  }
+
+  if (UNRESTRICTED_ACCOUNT_TYPES.has(userProfile.accountType)) {
+    return {
+      plan,
+      userProfile
+    };
+  }
+
+  if (userProfile.accountType !== "free") {
+    return {
+      plan,
+      userProfile
+    };
+  }
+
+  const limits = getAutomationLimits(userProfile.accountType);
+  const currentOutreachUsed = userProfile.automatedOutreachEventsUsed;
+  const currentNegotiationUsed = userProfile.automatedNegotiationEventsUsed;
+
+  if (actionType === "outreach") {
+    if (!plan.automation?.outreachUsageApplied) {
+      const updatedCounters = await incrementUserAutomationCounter(userId, "automated_outreach_events_used", limits.outreach);
+      if (!updatedCounters) {
+        return buildFreeAutomationLimitError("outreach");
+      }
+
+      userProfile.automatedEventCount = updatedCounters.automatedEventCount;
+      userProfile.automatedOutreachEventsUsed = updatedCounters.automatedOutreachEventsUsed;
+      userProfile.automatedNegotiationEventsUsed = updatedCounters.automatedNegotiationEventsUsed;
+    }
+
+    return {
+      plan: {
+        ...plan,
+        automation: {
+          ...plan.automation,
+          automatedEventSequence: plan.automation?.automatedEventSequence || userProfile.automatedEventCount || null,
+          outreachUsageApplied: true
+        }
+      },
+      userProfile
+    };
+  }
+
+  if (plan.automation?.negotiationUsageApplied) {
+    return {
+      plan,
+      userProfile
+    };
+  }
+
+  if (currentNegotiationUsed >= limits.negotiation) {
+    return buildFreeAutomationLimitError("negotiation");
+  }
+
+  const updatedCounters = await incrementUserAutomationCounter(userId, "automated_negotiation_events_used", limits.negotiation);
+  if (!updatedCounters) {
+      return buildFreeAutomationLimitError("negotiation");
+  }
+
+  userProfile.automatedEventCount = updatedCounters.automatedEventCount;
+  userProfile.automatedOutreachEventsUsed = updatedCounters.automatedOutreachEventsUsed;
+  userProfile.automatedNegotiationEventsUsed = updatedCounters.automatedNegotiationEventsUsed;
+
+  return {
+    plan: {
+      ...plan,
+      automation: {
+        ...plan.automation,
+        automatedEventSequence: plan.automation?.automatedEventSequence || userProfile.automatedEventCount || currentOutreachUsed || currentNegotiationUsed || null,
+        negotiationUsageApplied: true
+      }
+    },
+    userProfile
+  };
 }
 
 function toTitleCase(value) {
@@ -673,7 +845,10 @@ async function buildPlanDocument(payload, user, existingPlan = null) {
         vendorCategories.some((category) => category.selected && category.key === normalizeCategoryKey(vendor.category))
       ).length,
       inquiryEmailsSent,
-      vendorRepliesReceived
+      vendorRepliesReceived,
+      automatedEventSequence: existingPlan?.automation?.automatedEventSequence || null,
+      outreachUsageApplied: Boolean(existingPlan?.automation?.outreachUsageApplied),
+      negotiationUsageApplied: Boolean(existingPlan?.automation?.negotiationUsageApplied)
     },
     shortlist: preservedShortlist,
     finalSelection: existingPlan?.finalSelection || null
@@ -767,7 +942,10 @@ export async function updatePlanVendorCategories(planId, selectedVendorCategorie
       ...existingPlan.automation,
       inquiryEmailsDrafted: (existingPlan.shortlist || []).filter((vendor) =>
         vendorCategories.some((category) => category.selected && category.key === normalizeCategoryKey(vendor.category))
-      ).length
+      ).length,
+      automatedEventSequence: existingPlan.automation?.automatedEventSequence || null,
+      outreachUsageApplied: Boolean(existingPlan.automation?.outreachUsageApplied),
+      negotiationUsageApplied: Boolean(existingPlan.automation?.negotiationUsageApplied)
     }
   };
 
@@ -795,7 +973,7 @@ async function deliverEmail(message) {
 }
 
 export async function sendPlanInquiries(planId, userId) {
-  const plan = await getStoredPlan(planId, userId);
+  let plan = await getStoredPlan(planId, userId);
 
   if (!plan) {
     return null;
@@ -806,6 +984,13 @@ export async function sendPlanInquiries(planId, userId) {
       error: "Plan is paused"
     };
   }
+
+  const accessResult = await resolvePlanAutomationAccess(plan, userId, "outreach");
+  if (accessResult.error) {
+    return accessResult;
+  }
+
+  plan = accessResult.plan;
 
   const outboundMessages = [...plan.communication.outboundMessages];
   const updatedShortlist = [];
@@ -863,7 +1048,10 @@ export async function sendPlanInquiries(planId, userId) {
     },
     automation: {
       ...plan.automation,
-      inquiryEmailsSent: outboundMessages.filter((message) => message.type === "inquiry" && message.delivery.ok).length
+      inquiryEmailsSent: outboundMessages.filter((message) => message.type === "inquiry" && message.delivery.ok).length,
+      automatedEventSequence: plan.automation?.automatedEventSequence || null,
+      outreachUsageApplied: Boolean(plan.automation?.outreachUsageApplied),
+      negotiationUsageApplied: Boolean(plan.automation?.negotiationUsageApplied)
     },
     shortlist: updatedShortlist
   };
@@ -1035,7 +1223,7 @@ export async function recordInboundReply(payload) {
 }
 
 export async function finalizeVendorSelection(planId, vendorId, userId) {
-  const plan = await getStoredPlan(planId, userId);
+  let plan = await getStoredPlan(planId, userId);
 
   if (!plan) {
     return null;
@@ -1046,6 +1234,13 @@ export async function finalizeVendorSelection(planId, vendorId, userId) {
       error: "Plan is paused"
     };
   }
+
+  const accessResult = await resolvePlanAutomationAccess(plan, userId, "negotiation");
+  if (accessResult.error) {
+    return accessResult;
+  }
+
+  plan = accessResult.plan;
 
   const selectedVendor = plan.shortlist.find((vendor) => vendor.id === vendorId);
 
@@ -1098,6 +1293,12 @@ export async function finalizeVendorSelection(planId, vendorId, userId) {
       selectedAt: new Date().toISOString(),
       confirmationEmail,
       delivery
+    },
+    automation: {
+      ...plan.automation,
+      automatedEventSequence: plan.automation?.automatedEventSequence || null,
+      outreachUsageApplied: Boolean(plan.automation?.outreachUsageApplied),
+      negotiationUsageApplied: Boolean(plan.automation?.negotiationUsageApplied)
     }
   };
 

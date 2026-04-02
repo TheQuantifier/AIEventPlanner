@@ -305,6 +305,15 @@ button:disabled { opacity: 0.65; cursor: not-allowed; }
   line-height: 1.7;
   max-width: 34ch;
 }
+.landing-pricing-link {
+  color: #8fc7ff;
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+.landing-pricing-link:hover,
+.landing-pricing-link:focus-visible {
+  color: #c2e2ff;
+}
 .landing-mini-card,
 .landing-feature-card {
   border: 1px solid var(--line);
